@@ -31,3 +31,5 @@ evidence/_checkpoint.json
 Thumbs.db
 .idea/
 .vscode/
+
+frontend/_*.mjs

@@ -99,6 +99,22 @@ async function activeClient() {
   return clientFor(acct);
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// studionet can answer a gen_call with a transient failure; retry a few times.
+async function withRetry(fn, tries = 3, delay = 900) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      await sleep(delay * (i + 1));
+    }
+  }
+  throw last;
+}
+
 function num(v) {
   if (v === null || v === undefined) return 0;
   return Number(v);
@@ -106,17 +122,20 @@ function num(v) {
 
 export async function readModel() {
   const client = readClient();
-  const call = (functionName, args = []) =>
-    client.readContract({ address: CONTRACT_ADDRESS, abi: contractAbi, functionName, args });
-  const [budget, nextPid, nextRid, credited] = await Promise.all([
-    call("treasury_budget"), call("next_proposal_id"), call("next_review_id"), call("total_credited_tokens"),
-  ]);
-  const proposals = {};
-  for (let i = 1; i < nextPid; i++) {
+  const call = (functionName, args = [], tries = 3) =>
+    withRetry(() => client.readContract({ address: CONTRACT_ADDRESS, abi: contractAbi, functionName, args }), tries);
+
+  // Derive proposal and review presence by probing contiguous ids. The zero-arg
+  // getters can fail transiently on the node, so they are best-effort with
+  // fallbacks derived from the rows we did manage to fetch.
+  const props = {};
+  let pidMisses = 0;
+  for (let i = 1; i <= 40 && pidMisses < 3; i++) {
     try {
-      const p = await call("get_proposal", [BigInt(i)]);
-      if (!p || !p.title) continue;
-      proposals[i] = {
+      const p = await call("get_proposal", [BigInt(i)], 2);
+      if (!p || !p.title) { pidMisses++; continue; }
+      pidMisses = 0;
+      props[i] = {
         id: num(p.id), title: p.title, applicant: p.applicant, category: p.category,
         grant_manifest: p.grant_manifest, proof_url: p.proof_url,
         mandatory_artifact_token: p.mandatory_artifact_token,
@@ -125,23 +144,37 @@ export async function readModel() {
         conviction_multiplier: num(p.conviction_multiplier), impact_score: num(p.impact_score),
         status: p.status, artifact_verified: Boolean(p.artifact_verified),
       };
-    } catch { /* proposal may be absent */ }
+    } catch { pidMisses++; }
   }
-  const reviews = {};
-  for (let i = 1; i < nextRid; i++) {
+
+  const revs = {};
+  let ridMisses = 0;
+  for (let i = 1; i <= 60 && ridMisses < 3; i++) {
     try {
-      const r = await call("get_review", [BigInt(i)]);
-      if (!r || !r.summary) continue;
-      reviews[i] = {
+      const r = await call("get_review", [BigInt(i)], 2);
+      if (!r || !r.summary) { ridMisses++; continue; }
+      ridMisses = 0;
+      revs[i] = {
         id: num(r.id), proposal_id: num(r.proposal_id), reviewer: r.reviewer,
         review_score: num(r.review_score), contains_red_flag: Boolean(r.contains_red_flag),
         summary: r.summary, upvotes: num(r.upvotes),
       };
-    } catch { /* review may be absent */ }
+    } catch { ridMisses++; }
   }
+
+  const derivedCredited = Object.values(props).reduce((s, p) => s + p.credited_tokens, 0);
+  let budget = 50000000;
+  let credited = derivedCredited;
+  try { budget = num(await call("treasury_budget", [], 2)); } catch { /* fallback */ }
+  try { credited = num(await call("total_credited_tokens", [], 2)); } catch { /* fallback */ }
+
   return {
-    treasury_budget: num(budget), next_proposal_id: num(nextPid), next_review_id: num(nextRid),
-    total_credited_tokens: num(credited), proposals, reviews,
+    treasury_budget: budget,
+    next_proposal_id: Object.keys(props).length + 1,
+    next_review_id: Object.keys(revs).length + 1,
+    total_credited_tokens: credited,
+    proposals: props,
+    reviews: revs,
   };
 }
 
