@@ -18,6 +18,14 @@ fixed treasury pool.
 - Deployment evidence: [docs/evidence.md](docs/evidence.md)
 - Adversarial fund-safety review: [docs/adversarial-review.md](docs/adversarial-review.md)
 
+### Deployment identity
+
+- Deploy tx (studionet): `0x00ad0c613c8352b30e3d75414b93128a80167b5cfa54cb2a65327c5461d8498c`
+- Contract file sha256 (LF, matches local, submitted and on-chain readback):
+  `68f3b74b79b162d28d8f04c3a02954e385b46adf7709aaf4b01ee691eda4e7fa`
+- Git tag for the deployed contract: `studionet-v1`
+- Pinned runner: `py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6`
+
 ## Why GenLayer
 
 The grant decision is a subjective, externally-evidenced judgment that must be

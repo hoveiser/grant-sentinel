@@ -13,6 +13,28 @@ moves funds, independent on-chain re-fetch of the external proof URL, floors
 and ceilings on every numeric window, and explicit race checks between
 competing transitions.
 
+## State machine
+
+| Status | Who may act | Transition | Fund effect |
+| --- | --- | --- | --- |
+| (none) | any account | submit_grant_proposal -> SCREENING | none |
+| SCREENING | non-applicant delegate | submit_delegate_review (stays SCREENING) | none (reputation only) |
+| SCREENING | non-author upvoter | upvote_delegate_review (stays SCREENING) | none (reputation only) |
+| SCREENING | applicant | withdraw_proposal -> WITHDRAWN | none |
+| SCREENING | any account | audit_grant_live -> APPROVED_FUNDED / PARTIAL_GRANT / REJECTED | treasury -> claimable |
+| SCREENING | owner | audit_grant_deterministic -> tier | treasury -> claimable |
+| APPROVED_FUNDED / PARTIAL_GRANT | applicant | claim_grant_payout | claimable -> paid out |
+| APPROVED_FUNDED / PARTIAL_GRANT / REJECTED / WITHDRAWN | (terminal) | no further transition | locked |
+
+Liveness: the only state that holds funds is `claimable_grants`, and its owner
+can always exit via `claim_grant_payout` with no deadline, so funds are never
+stuck. A proposal left in SCREENING locks no funds (nothing was credited yet);
+it is advanced by any auditor or withdrawn by its applicant. The contract uses
+no wall-clock or block-timestamp windows, so there is no time-based lockup and
+no deadline to bound. Every audit path is guarded by `status == SCREENING`, and
+`withdraw` and both audits are mutually exclusive on that same guard, so no two
+transitions can both move a proposal out of SCREENING.
+
 ## Findings (all FIXED)
 
 ### F1. Double payout across the two audit paths
@@ -113,6 +135,19 @@ a zero balance, so a payout cannot be claimed twice.
   seeded claim).
 
 ## Known residual limitations (disclosed)
+- Consensus precision on the exact partial amount: `audit_grant_live` requires
+  validators to agree on the tier band (reject / partial / full) and on the
+  `artifact_verified` flag. The material decision (which tier, and therefore
+  0% versus a partial tranche versus 100%) is consensus-gated. Within the
+  PARTIAL band the proportional amount is derived from the leader's reported
+  score, so two honest validators in the same band could differ by up to the
+  band width. This is bounded (never crosses a tier boundary and never exceeds
+  the requested grant) and the exact-settlement path is the owner-only
+  `audit_grant_deterministic`. It is NOT claimed that the live audit pins the
+  exact partial figure by consensus; only the tier is guaranteed agreed.
+- Direct-mode tests exercise the leader path only; they do not prove validator
+  agreement. Validator behavior for the live audit is covered by the studionet
+  run recorded in `docs/evidence.md`.
 - The community modifier operates on the snapshot taken at audit time; a review
   submitted after the audit snapshot but in the same block does not affect that
   audit, by design, to keep the disbursement deterministic and race-free.
