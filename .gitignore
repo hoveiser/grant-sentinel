@@ -1,0 +1,33 @@
+# Secrets and environment
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+dist/
+dist-ssr/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+artifacts/
+.gltest_cache/
+
+# Logs and media
+*.log
+*.mp4
+*.webm
+
+# Demo / tooling scratch
+tools/_demo/
+evidence/_checkpoint.json
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

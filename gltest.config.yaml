@@ -1,0 +1,15 @@
+paths:
+  contracts: contracts/
+  artifacts: artifacts/
+
+environment: .env
+
+networks:
+  default: studionet
+  localnet:
+    url: http://localhost:4000/api
+  studionet:
+    id: 61999
+    url: https://studio.genlayer.com/api
+    accounts:
+      - "${GENLAYER_PRIVATE_KEY}"

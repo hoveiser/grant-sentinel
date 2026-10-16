@@ -1,0 +1,103 @@
+{
+  "chain_id": 61999,
+  "network": "studionet",
+  "contract_address": "0x2736a79F03d36080e63FA2ab164F7E9151D03978",
+  "owner": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
+  "deploy_tx": "0x00ad0c613c8352b30e3d75414b93128a80167b5cfa54cb2a65327c5461d8498c",
+  "transactions": {
+    "deploy": "0x00ad0c613c8352b30e3d75414b93128a80167b5cfa54cb2a65327c5461d8498c",
+    "proposal_1": "0x6980103c9be56f00bfbdfde725338606ec111147942554328935fd33c4491659",
+    "proposal_2": "0x7ca117848c8600abb23a24f8b65e0646db343d73f910c058868dafa4706fc284",
+    "review_endorse_p1": "0xa357524aec872a79ca679cf0aede277bd5d65632abb471d72487c043175b8136",
+    "review_flag_p1": "0xfee721d62d30adc1c47b3bb9d74b83ec0d8272131eb88331976316eb8a63bf28",
+    "review_endorse_p2": "0xc7c81f78616994c3fd4c911a8bb17cb704e9d453a39f003117325c1003312774",
+    "upvote_1": "0xc2bdb2f582214d7b8e0ffefb2d47a0df1ddbeea27079297c158715c4423dc4e1",
+    "audit_live_1": "0xa1c2a2c018252da9dded00d68ea08242bfed2747feeff85075c95c5417c517e6",
+    "audit_det_2": "0x15abc3bbbc8e10789c7be54cd3f8ab572017d35ffc572b5bcdf4410e52eddf7e",
+    "claim_owner": "0x1f72b518cc8489eaf3cec4299c3b46ec37a954f32582b56d39053b6642c31226",
+    "rollback_self_review": "0xc5ffd7c17837f2df65008fea0844d56dafbb365eb539f1925a20a878874a0544"
+  },
+  "rollback_execution_failed": true,
+  "summary": {
+    "approved_count": 1,
+    "partial_count": 0,
+    "proposal_count": 2,
+    "rejected_count": 1,
+    "review_count": 3,
+    "screening_count": 0,
+    "total_granted": 90000,
+    "treasury_budget": 49910000,
+    "withdrawn_count": 0
+  },
+  "proposal1": {
+    "applicant": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
+    "approved_payout": 0,
+    "conviction_endorsements": 1,
+    "deliverable_manifest": "Ship audited PLONK prover with docs, tests and CI for public use.",
+    "mandatory_artifact_token": "SENTINEL-ZK-2026",
+    "project_title": "ZK Open-Source Prover Library",
+    "proof_url": "https://example.com/",
+    "proposal_id": 1,
+    "public_good_category": "DEVELOPER_TOOLS",
+    "red_flag_challenges": 1,
+    "requested_grant": 120000,
+    "review_count": 2,
+    "sentinel_audit_report": "Audit failed. The submitted evidence contains generic placeholder documentation text in multiple languages and fails to include the mandatory artifact token 'SENTINEL-ZK-2026'. There is no evidence of a ZK Open-Source Prover Library, PLONK implementation, documentation, or CI configuration. The submission appears to be a placeholder or incorrect link.",
+    "status": "REJECTED",
+    "verified_impact_score": 0
+  },
+  "proposal2": {
+    "applicant": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
+    "approved_payout": 90000,
+    "conviction_endorsements": 1,
+    "deliverable_manifest": "Public indexer exposing mempool analytics API for researchers.",
+    "mandatory_artifact_token": "SENTINEL-MEV-2026",
+    "project_title": "Realtime MEV-Watch Indexer",
+    "proof_url": "https://example.com/",
+    "proposal_id": 2,
+    "public_good_category": "PROTOCOL_INFRA",
+    "red_flag_challenges": 0,
+    "requested_grant": 90000,
+    "review_count": 1,
+    "sentinel_audit_report": "Owner-verified score after re-checking the indexer proof.",
+    "status": "APPROVED_FUNDED",
+    "verified_impact_score": 87
+  },
+  "reviews_proposal1": [
+    {
+      "delegate": "0x958288f6baBA6a2baBb0bE6f3a2137b0B78204b0",
+      "delegate_handle": "sentinel-delegate-oveis",
+      "helpful_votes": 1,
+      "proposal_id": 1,
+      "rationale": "Reproducible build, tests pass locally, deliverable matches manifest.",
+      "review_id": 1,
+      "verdict_stance": "ENDORSE_CONVICTION"
+    },
+    {
+      "delegate": "0x993199Fd343bF74525D122594Ae3620C64B17d5c",
+      "delegate_handle": "tech-reviewer-ada",
+      "helpful_votes": 0,
+      "proposal_id": 1,
+      "rationale": "License not declared yet; flagging for the maintainers to resolve.",
+      "review_id": 2,
+      "verdict_stance": "RED_FLAG_CHALLENGE"
+    }
+  ],
+  "leaderboard": [
+    {
+      "delegate": "0x958288f6baBA6a2baBb0bE6f3a2137b0B78204b0",
+      "reputation": 28
+    },
+    {
+      "delegate": "0x993199Fd343bF74525D122594Ae3620C64B17d5c",
+      "reputation": 12
+    }
+  ],
+  "treasury_invariant": true,
+  "identity": {
+    "local_file_sha256": "68f3b74b79b162d28d8f04c3a02954e385b46adf7709aaf4b01ee691eda4e7fa",
+    "submitted_bytes_sha256": "68f3b74b79b162d28d8f04c3a02954e385b46adf7709aaf4b01ee691eda4e7fa",
+    "onchain_readback_sha256": "68f3b74b79b162d28d8f04c3a02954e385b46adf7709aaf4b01ee691eda4e7fa"
+  },
+  "identity_pass": true
+}
