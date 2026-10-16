@@ -7,43 +7,13 @@ export { shortAddr } from "./config.js";
 const IDENTITY_KEY = "grantsentinel.identity.pk";
 const BURNER_KEY = "grantsentinel.burner.pk";
 
-// Minimal ABI entries for the contract functions and views the UI calls.
-export const contractAbi = [
-  { type: "function", name: "treasury_budget", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "next_proposal_id", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "next_review_id", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "total_credited_tokens", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "get_proposal", stateMutability: "view", inputs: [{ name: "pid", type: "uint256" }], outputs: [{ type: "tuple", components: [
-    { name: "id", type: "uint256" }, { name: "title", type: "string" }, { name: "applicant", type: "address" },
-    { name: "category", type: "string" }, { name: "grant_manifest", type: "string" }, { name: "proof_url", type: "string" },
-    { name: "mandatory_artifact_token", type: "string" }, { name: "requested_tokens", type: "uint256" },
-    { name: "credited_tokens", type: "uint256" }, { name: "remaining_tokens", type: "uint256" },
-    { name: "upvotes", type: "uint256" }, { name: "conviction_multiplier", type: "uint256" },
-    { name: "impact_score", type: "uint8" }, { name: "status", type: "string" }, { name: "artifact_verified", type: "bool" },
-  ] }] },
-  { type: "function", name: "get_review", stateMutability: "view", inputs: [{ name: "rid", type: "uint256" }], outputs: [{ type: "tuple", components: [
-    { name: "id", type: "uint256" }, { name: "proposal_id", type: "uint256" }, { name: "reviewer", type: "address" },
-    { name: "review_score", type: "uint8" }, { name: "contains_red_flag", type: "bool" }, { name: "summary", type: "string" },
-    { name: "upvotes", type: "uint256" },
-  ] }] },
-  { type: "function", name: "submit_grant_proposal", stateMutability: "nonpayable", inputs: [
-    { name: "title", type: "string" }, { name: "category", type: "string" }, { name: "grant_manifest", type: "string" },
-    { name: "proof_url", type: "string" }, { name: "mandatory_artifact_token", type: "string" }, { name: "requested_tokens", type: "uint256" },
-  ], outputs: [] },
-  { type: "function", name: "submit_delegate_review", stateMutability: "nonpayable", inputs: [
-    { name: "proposal_id", type: "uint256" }, { name: "review_score", type: "uint8" }, { name: "risk_flags", type: "string" },
-    { name: "artifact_verified", type: "bool" }, { name: "summary", type: "string" },
-  ], outputs: [] },
-  { type: "function", name: "upvote_delegate_review", stateMutability: "nonpayable", inputs: [{ name: "review_id", type: "uint256" }], outputs: [] },
-  { type: "function", name: "audit_grant_live", stateMutability: "nonpayable", inputs: [{ name: "proposal_id", type: "uint256" }], outputs: [] },
-  { type: "function", name: "claim_grant_payout", stateMutability: "nonpayable", inputs: [{ name: "proposal_id", type: "uint256" }], outputs: [] },
-  { type: "function", name: "withdraw_proposal", stateMutability: "nonpayable", inputs: [{ name: "proposal_id", type: "uint256" }], outputs: [] },
-];
-
 function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } }
 function lsDel(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } }
 
+// genlayer-js resolves the deployed contract schema itself, so we never hand a
+// local ABI to readContract/writeContract. That keeps field decoding aligned
+// with the real GrantProposal / DelegateReview structs.
 export function readClient() {
   return createClient({ chain: studionet });
 }
@@ -99,82 +69,85 @@ async function activeClient() {
   return clientFor(acct);
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// studionet can answer a gen_call with a transient failure; retry a few times.
-async function withRetry(fn, tries = 3, delay = 900) {
-  let last;
-  for (let i = 0; i < tries; i++) {
-    try {
-      return await fn();
-    } catch (e) {
-      last = e;
-      await sleep(delay * (i + 1));
-    }
-  }
-  throw last;
-}
-
 function num(v) {
   if (v === null || v === undefined) return 0;
   return Number(v);
 }
 
+function read(client, functionName, args = []) {
+  return client.readContract({ address: CONTRACT_ADDRESS, functionName, args });
+}
+
 export async function readModel() {
   const client = readClient();
-  const call = (functionName, args = [], tries = 3) =>
-    withRetry(() => client.readContract({ address: CONTRACT_ADDRESS, abi: contractAbi, functionName, args }), tries);
-
-  // Derive proposal and review presence by probing contiguous ids. The zero-arg
-  // getters can fail transiently on the node, so they are best-effort with
-  // fallbacks derived from the rows we did manage to fetch.
-  const props = {};
-  let pidMisses = 0;
-  for (let i = 1; i <= 40 && pidMisses < 3; i++) {
-    try {
-      const p = await call("get_proposal", [BigInt(i)], 2);
-      if (!p || !p.title) { pidMisses++; continue; }
-      pidMisses = 0;
-      props[i] = {
-        id: num(p.id), title: p.title, applicant: p.applicant, category: p.category,
-        grant_manifest: p.grant_manifest, proof_url: p.proof_url,
-        mandatory_artifact_token: p.mandatory_artifact_token,
-        requested_tokens: num(p.requested_tokens), credited_tokens: num(p.credited_tokens),
-        remaining_tokens: num(p.remaining_tokens), upvotes: num(p.upvotes),
-        conviction_multiplier: num(p.conviction_multiplier), impact_score: num(p.impact_score),
-        status: p.status, artifact_verified: Boolean(p.artifact_verified),
-      };
-    } catch { pidMisses++; }
+  const rawList = await read(client, "get_all_proposals", []);
+  const proposals = {};
+  for (const p of rawList || []) {
+    const id = num(p.proposal_id);
+    const requested = num(p.requested_grant);
+    const credited = num(p.approved_payout);
+    proposals[id] = {
+      id,
+      title: p.project_title,
+      applicant: p.applicant,
+      category: p.public_good_category,
+      grant_manifest: p.deliverable_manifest,
+      proof_url: p.proof_url,
+      mandatory_artifact_token: p.mandatory_artifact_token,
+      requested_tokens: requested,
+      credited_tokens: credited,
+      remaining_tokens: Math.max(0, requested - credited),
+      upvotes: num(p.conviction_endorsements),
+      red_flags: num(p.red_flag_challenges),
+      review_count: num(p.review_count),
+      impact_score: num(p.verified_impact_score),
+      status: p.status,
+      artifact_verified: true,
+      audit_report: p.sentinel_audit_report,
+    };
   }
 
-  const revs = {};
-  let ridMisses = 0;
-  for (let i = 1; i <= 60 && ridMisses < 3; i++) {
+  const reviews = {};
+  // studionet throttles to 30 requests/minute, so fetch delegate reviews only for
+  // the two most recent proposals rather than every one. The card review list is
+  // best-effort; the inspector visualises the pipeline from proposal fields only.
+  const recentIds = Object.keys(proposals).sort((a, b) => Number(b) - Number(a)).slice(0, 2);
+  for (const id of recentIds) {
     try {
-      const r = await call("get_review", [BigInt(i)], 2);
-      if (!r || !r.summary) { ridMisses++; continue; }
-      ridMisses = 0;
-      revs[i] = {
-        id: num(r.id), proposal_id: num(r.proposal_id), reviewer: r.reviewer,
-        review_score: num(r.review_score), contains_red_flag: Boolean(r.contains_red_flag),
-        summary: r.summary, upvotes: num(r.upvotes),
-      };
-    } catch { ridMisses++; }
+      const revs = await read(client, "get_proposal_reviews", [BigInt(id)]);
+      for (const r of revs || []) {
+        reviews[num(r.review_id)] = {
+          id: num(r.review_id),
+          proposal_id: num(r.proposal_id),
+          stance: r.verdict_stance,
+          contains_red_flag: r.verdict_stance === "RED_FLAG_CHALLENGE",
+          summary: r.rationale,
+          helpful: num(r.helpful_votes),
+          handle: r.delegate_handle,
+          delegate: r.delegate,
+        };
+      }
+    } catch { /* transient node or rate-limit failure */ }
   }
 
-  const derivedCredited = Object.values(props).reduce((s, p) => s + p.credited_tokens, 0);
-  let budget = 50000000;
-  let credited = derivedCredited;
-  try { budget = num(await call("treasury_budget", [], 2)); } catch { /* fallback */ }
-  try { credited = num(await call("total_credited_tokens", [], 2)); } catch { /* fallback */ }
+  let summary = {};
+  try { summary = await read(client, "get_sentinel_summary", []); } catch { /* best effort */ }
+  const derivedCredited = Object.values(proposals).reduce((s, p) => s + p.credited_tokens, 0);
 
   return {
-    treasury_budget: budget,
-    next_proposal_id: Object.keys(props).length + 1,
-    next_review_id: Object.keys(revs).length + 1,
-    total_credited_tokens: credited,
-    proposals: props,
-    reviews: revs,
+    treasury_budget: num(summary.treasury_budget) || 50000000,
+    total_credited_tokens: num(summary.total_granted) || derivedCredited,
+    next_proposal_id: num(summary.proposal_count) + 1,
+    next_review_id: num(summary.review_count) + 1,
+    counts: {
+      screening: num(summary.screening_count),
+      approved: num(summary.approved_count),
+      partial: num(summary.partial_count),
+      rejected: num(summary.rejected_count),
+      withdrawn: num(summary.withdrawn_count),
+    },
+    proposals,
+    reviews,
   };
 }
 
@@ -186,23 +159,43 @@ function leaderSuccess(receipt) {
   return Array.isArray(lr) && lr[0] && lr[0].execution_result === "SUCCESS";
 }
 
-// Submit a write with the active account, wait for FINALIZED, report success.
 export async function write(functionName, args = []) {
   const client = await activeClient();
   const hash = await client.writeContract({
     address: CONTRACT_ADDRESS,
-    abi: contractAbi,
     functionName,
     args,
     value: 0n,
   });
-  const receipt = await client.waitForTransactionReceipt({ hash });
+  // GenLayer may hand back an intermediate ACCEPTED receipt first; poll until the
+  // transaction is FINALIZED (or a deadline) so the UI reports true execution.
+  const receipt = await pollReceipt(client, hash, 30000);
   return {
     hash,
-    statusName: receipt.status_name,
-    finalized: receipt.status_name === "FINALIZED",
+    statusName: receipt ? receipt.status_name : "UNKNOWN",
+    finalized: !!receipt && receipt.status_name === "FINALIZED",
     success: leaderSuccess(receipt),
-    message: (receipt.consensus_data && receipt.consensus_data.message) || "",
+    message: (receipt && receipt.consensus_data && receipt.consensus_data.message) || "",
     receipt,
   };
+}
+
+async function pollReceipt(client, hash, deadlineMs) {
+  const end = Date.now() + deadlineMs;
+  let last = null;
+  try {
+    last = await client.waitForTransactionReceipt({ hash });
+  } catch { /* not mined yet */ }
+  while (Date.now() < end) {
+    if (last && last.status_name === "FINALIZED") return last;
+    await new Promise((r) => setTimeout(r, 4000));
+    try {
+      if (typeof client.getTransactionReceipt === "function") {
+        last = await client.getTransactionReceipt({ hash });
+      } else {
+        last = await client.waitForTransactionReceipt({ hash, timeout: 4000 });
+      }
+    } catch { /* still pending */ }
+  }
+  return last;
 }

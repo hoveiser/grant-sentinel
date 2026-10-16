@@ -3,7 +3,7 @@ import {
   connectIdentity, disconnectIdentity, readModel, write, switchToBurner,
   connectMetaMask, isBurnerActive, shortAddr,
 } from "./gl";
-import { CONTRACT_ADDRESS, simulateTier } from "./config";
+import { CONTRACT_ADDRESS, CATEGORIES, STANCES, STATUS, simulateTier } from "./config";
 import Gauge from "./components/Gauge";
 import BackgroundMesh from "./components/BackgroundMesh";
 import ConsensusInspector from "./components/ConsensusInspector";
@@ -14,33 +14,25 @@ import {
   Sliders, Activity, FileSignature, ArrowUp, ScanSearch, Coins, X, ChevronRight,
 } from "lucide-react";
 
-const CATEGORIES = ["DEFI", "AI_INFRA", "SECURITY", "CLIMATE"];
-
-function tierColor(tier) {
-  if (tier === "APPROVED_FULL") return "#2fbf7a";
-  if (tier === "APPROVED_PARTIAL") return "#d6b25c";
-  return "#e06c75";
+function tierColor(status) {
+  if (status === STATUS.APPROVED) return "#2fbf7a";
+  if (status === STATUS.PARTIAL) return "#d6b25c";
+  if (status === STATUS.REJECTED) return "#e06c75";
+  if (status === STATUS.WITHDRAWN) return "#8ea3bd";
+  return "#60d2d6"; // SCREENING
 }
 
-// Interactive Payout & Consensus Simulator.
+// Interactive payout & consensus simulator mirroring _apply_verdict() exactly.
 function Simulator({ budget }) {
   const [score, setScore] = useState(82);
-  const [mult, setMult] = useState(1000);
-  const [remaining, setRemaining] = useState(120000);
+  const [endorsed, setEndorsed] = useState(2);
+  const [redFlags, setRedFlags] = useState(0);
+  const [requested, setRequested] = useState(120000);
   const [artifact, setArtifact] = useState(true);
-  const [redFlag, setRedFlag] = useState(false);
 
-  const effScore = useMemo(() => {
-    let s = score + (redFlag ? -15 : 0);
-    if (!artifact && s > 70) s = 70;
-    return Math.max(0, Math.min(100, s));
-  }, [score, artifact, redFlag]);
-
-  const tier = simulateTier(effScore, artifact);
-  const conviction = Math.min(1500, Math.max(1000, mult + Math.min(200, 10 * 5)));
-  const adjusted = Math.min(100, Math.round((effScore * conviction) / 1000));
-  const raw = tier.tier === "APPROVED_FULL" ? remaining : tier.tier === "APPROVED_PARTIAL" ? Math.floor((remaining * 45) / 100) : 0;
-  const paid = Math.min(raw, budget);
+  const tier = simulateTier(score, endorsed, redFlags, artifact);
+  const rawPayout = Math.floor(requested * tier.fraction);
+  const payout = Math.min(rawPayout, budget);
 
   return (
     <div className="simulator glass">
@@ -48,51 +40,48 @@ function Simulator({ budget }) {
         <Sliders size={16} className="accent" />
         <h3>Payout &amp; Consensus What-If Simulator</h3>
       </div>
-      <p className="muted small">Drag the sliders to preview the exact on-chain settlement math before submitting a transaction.</p>
+      <p className="muted small">Drag the sliders to preview the exact on-chain settlement math (conviction modifier, unverified cap, tiers) before submitting a transaction.</p>
       <div className="sim-body">
         <div className="sim-controls">
           <label className="slider">
-            <span>AI consensus score <b>{score}</b></span>
+            <span>AI verified impact score <b>{score}</b></span>
             <input type="range" min="0" max="100" value={score} onChange={(e) => { setScore(Number(e.target.value)); click(); }} />
           </label>
           <label className="slider">
-            <span>Remaining tokens <b>{remaining.toLocaleString()}</b></span>
-            <input type="range" min="0" max="500000" step="1000" value={remaining} onChange={(e) => { setRemaining(Number(e.target.value)); click(); }} />
+            <span>Conviction endorsements <b>{endorsed}</b></span>
+            <input type="range" min="0" max="10" value={endorsed} onChange={(e) => { setEndorsed(Number(e.target.value)); click(); }} />
           </label>
           <label className="slider">
-            <span>Community upvotes <b>{Math.round((mult - 1000) / 10)}</b></span>
-            <input type="range" min="1000" max="1500" value={mult} onChange={(e) => { setMult(Number(e.target.value)); click(); }} />
+            <span>Red-flag challenges <b>{redFlags}</b></span>
+            <input type="range" min="0" max="10" value={redFlags} onChange={(e) => { setRedFlags(Number(e.target.value)); click(); }} />
           </label>
           <label className="slider">
-            <span>Conviction multiplier <b>{(conviction / 1000).toFixed(3)}x</b></span>
-            <input type="range" min="1000" max="1500" value={conviction} readOnly />
+            <span>Requested grant <b>{requested.toLocaleString()}</b></span>
+            <input type="range" min="100" max="5000000" step="100" value={requested} onChange={(e) => { setRequested(Number(e.target.value)); click(); }} />
           </label>
           <div className="toggles">
             <button type="button" className={`toggle ${artifact ? "on" : ""}`} onClick={() => { setArtifact(!artifact); hum(); }}>
               <ScanSearch size={14} /> artifact verified
             </button>
-            <button type="button" className={`toggle danger ${redFlag ? "on" : ""}`} onClick={() => { setRedFlag(!redFlag); hum(); }}>
-              <ShieldAlert size={14} /> apply red-flag (-15)
-            </button>
           </div>
         </div>
         <div className="sim-viz">
-          <Gauge value={effScore} label="Effective Score" tone={tierColor(tier.tier)} />
+          <Gauge value={tier.impact} label="Adjusted Impact" tone={tierColor(tier.status)} />
           <div className="tier-bar">
             <div className="tier-track">
               <span className="seg reject" style={{ width: "45%" }} />
               <span className="seg partial" style={{ width: "30%" }} />
               <span className="seg full" style={{ width: "25%" }} />
-              <span className="marker" style={{ left: `${effScore}%` }} title={`score ${effScore}`} />
+              <span className="marker" style={{ left: `${tier.impact}%` }} title={`impact ${tier.impact}`} />
             </div>
             <div className="tier-legend">
-              <span>0-44 REJECTED</span><span>45-74 PARTIAL</span><span>75-100 FULL</span>
+              <span>0-44 REJECTED</span><span>45-74 PARTIAL</span><span>75-100 APPROVED</span>
             </div>
           </div>
           <div className="sim-out">
-            <div><span>Payout tier</span><b style={{ color: tierColor(tier.tier) }}>{tier.tier}</b></div>
-            <div><span>Adjusted score</span><b>{adjusted}</b></div>
-            <div><span>Projected payout</span><b>{paid.toLocaleString()} / {remaining.toLocaleString()}</b></div>
+            <div><span>Settlement status</span><b style={{ color: tierColor(tier.status) }}>{tier.status}</b></div>
+            <div><span>Adjusted impact</span><b>{tier.impact}</b></div>
+            <div><span>Projected payout</span><b>{payout.toLocaleString()} / {requested.toLocaleString()}</b></div>
           </div>
         </div>
       </div>
@@ -110,9 +99,10 @@ export default function App() {
   const [tab, setTab] = useState("all");
   const [inspectId, setInspectId] = useState(null);
   const [form, setForm] = useState({
-    title: "", category: "AI_INFRA", manifest: "", proof_url: "", token: "v2", grant: 120000,
+    project_title: "", public_good_category: "AI_RESEARCH", deliverable_manifest: "",
+    proof_url: "", mandatory_artifact_token: "v2", requested_grant: 120000,
   });
-  const [review, setReview] = useState({ pid: 1, score: 82, artifact: true, risk: "", note: "" });
+  const [review, setReview] = useState({ pid: 1, handle: "sentinel-delegate", stance: "TECHNICAL_NOTE", rationale: "" });
 
   const addLine = useCallback((line) => setLog((prev) => [...prev.slice(-60), line]), []);
 
@@ -125,7 +115,7 @@ export default function App() {
   }, [addLine]);
 
   useEffect(() => {
-    setAddress(connectIdentity() || null);
+    setAddress(connectIdentity()?.address || null);
     setBurner(isBurnerActive());
     refresh();
   }, [refresh]);
@@ -157,13 +147,15 @@ export default function App() {
     }
   }, [addLine, refresh]);
 
-  // Adversarial guard test: submits an out-of-policy proposal that the contract must reject.
+  // Adversarial guard test: invalid category must revert on-chain.
   const runGuard = useCallback(() => {
     setBusy(true);
     addLine("guard test: submitting invalid category (expect revert)");
     click();
     (async () => {
-      const res = await write("submit_grant_proposal", ["Guard Probe", "EXPLOIT", "x".repeat(20), "https://example.com/x", "v2", 999]);
+      const res = await write("submit_grant_proposal", [
+        "Guard Probe", "EXPLOIT_CATEGORY", "x".repeat(20), "https://example.com/x", "v2", 999n,
+      ]);
       if (res.statusName === "FINALIZED" && !res.success) {
         addLine(`guard tripped as expected · reverted ${shortAddr(res.hash)} · ${String(res.message || "").slice(0, 80)}`);
         errSfx();
@@ -179,12 +171,12 @@ export default function App() {
   const setR = (k) => (e) => setReview({ ...review, [k]: e.target.value });
   const quickFill = () => {
     setForm({
-      title: "Open Zero-Knowledge Verifier Library",
-      category: "SECURITY",
-      manifest: "Audit-ready ZK verifier with 214 passing tests, deterministic circuit builders, and a public API. Sentinels should locate the token v2.",
-      proof_url: "https://github.com/audit-wiki/index.md",
-      token: "v2",
-      grant: 120000,
+      project_title: "Open Zero-Knowledge Verifier Library",
+      public_good_category: "PROTOCOL_INFRA",
+      deliverable_manifest: "Audit-ready ZK verifier with 214 passing tests, deterministic circuit builders, and a public API. Sentinels should locate the token v2.",
+      proof_url: "https://example.com/proof",
+      mandatory_artifact_token: "v2",
+      requested_grant: 120000,
     });
     hum();
     addLine("quick-fill populated the proposal form");
@@ -193,12 +185,11 @@ export default function App() {
   const switchTab = (t) => { setTab(t); hum(); };
 
   const proposals = useMemo(() => {
-    const ids = model ? Object.keys(model.proposals).map(Number).sort((a, b) => b - a) : [];
-    return ids.map((id) => model.proposals[id]).filter((p) => {
-      if (tab === "active") return p.status === "ACTIVE_FUNDING";
-      if (tab === "screening") return p.status === "PENDING_SCREENING";
-      if (tab === "approved") return p.status === "APPROVED_FUNDED" || p.status === "PARTIALLY_FUNDED";
-      if (tab === "paid") return p.status === "FULLY_PAID";
+    const list = model ? Object.values(model.proposals).sort((a, b) => b.id - a.id) : [];
+    return list.filter((p) => {
+      if (tab === "active") return p.status === STATUS.SCREENING;
+      if (tab === "approved") return p.status === STATUS.APPROVED || p.status === STATUS.PARTIAL;
+      if (tab === "rejected") return p.status === STATUS.REJECTED || p.status === STATUS.WITHDRAWN;
       return true;
     });
   }, [model, tab]);
@@ -219,7 +210,7 @@ export default function App() {
         <div className="top-actions">
           <button
             className={`icon-btn ${muted ? "" : "on"}`}
-            onClick={() => { setMuted(toggleMuted()); if (muted) click(); }}
+            onClick={() => setMuted(toggleMuted())}
             title={muted ? "Unmute UI sounds" : "Mute UI sounds"}
             aria-pressed={!muted}
           >
@@ -231,10 +222,10 @@ export default function App() {
           {address ? (
             <>
               <span className="pill">{burner ? "burner" : "identity"} {shortAddr(address)}</span>
-              <button className="ghost icon-btn" onClick={() => { switchToBurner(); setBurner(isBurnerActive()); setAddress(connectIdentity()?.address || address); setMuted(isMuted()); hum(); }} title="Switch Identity: ephemeral burner">
+              <button className="ghost icon-btn" onClick={() => { switchToBurner(); setBurner(isBurnerActive()); setAddress(connectIdentity()?.address || address); hum(); }} title="Switch Identity: ephemeral burner">
                 <Sparkles size={16} />
               </button>
-              <button className="ghost icon-btn" onClick={() => { connectMetaMask(); setBurner(isBurnerActive()); setAddress(connectIdentity()?.address || address); }} title="Link MetaMask">
+              <button className="ghost icon-btn" onClick={() => { connectMetaMask().then((r) => { setAddress(r.address); setBurner(false); }).catch((e) => addLine(`metamask: ${String(e.message).slice(0, 60)}`)); }} title="Link MetaMask">
                 <Wallet size={16} />
               </button>
               <button className="danger icon-btn" onClick={() => { disconnectIdentity(); setAddress(null); setBurner(false); click(); }} title="Disconnect">
@@ -242,7 +233,7 @@ export default function App() {
               </button>
             </>
           ) : (
-            <button className="primary" onClick={() => { setAddress(connectIdentity()); click(); }}>
+            <button className="primary" onClick={() => { setAddress(connectIdentity()?.address || null); setBurner(isBurnerActive()); click(); }}>
               <Wallet size={16} /> Connect GenLayer Identity
             </button>
           )}
@@ -269,17 +260,17 @@ export default function App() {
           {model && (
             <div className="treasury-row">
               <div className="stat glass"><span>Treasury Budget</span><b>{model.treasury_budget.toLocaleString()}</b></div>
-              <div className="stat glass"><span>Total Credited</span><b>{model.total_credited_tokens.toLocaleString()}</b></div>
-              <div className="stat glass"><span>Uncredited Pool</span><b>{(model.treasury_budget - model.total_credited_tokens).toLocaleString()}</b></div>
+              <div className="stat glass"><span>Total Granted</span><b>{model.total_credited_tokens.toLocaleString()}</b></div>
+              <div className="stat glass"><span>Ungranted Pool</span><b>{(model.treasury_budget - model.total_credited_tokens).toLocaleString()}</b></div>
               <div className="stat glass"><span>Proposals</span><b>{model.next_proposal_id - 1}</b></div>
               <div className="stat glass"><span>Reviews</span><b>{model.next_review_id - 1}</b></div>
             </div>
           )}
 
-          <Simulator budget={model ? model.treasury_budget : 50000000} />
+          <Simulator budget={model ? Math.max(0, model.treasury_budget - model.total_credited_tokens) : 50000000} />
 
           <div className="tabs">
-            {[["all", "All"], ["active", "Active Funding"], ["screening", "Pending Screening"], ["approved", "Approved"], ["paid", "Paid"]].map(([k, lbl]) => (
+            {[["all", "All"], ["active", "Screening"], ["approved", "Funded"], ["rejected", "Rejected / Withdrawn"]].map(([k, lbl]) => (
               <button key={k} className={`tab ${tab === k ? "on" : ""}`} onClick={() => switchTab(k)}>{lbl}</button>
             ))}
           </div>
@@ -289,8 +280,7 @@ export default function App() {
             {!model && <p className="muted">Loading on-chain state...</p>}
             {model && proposals.length === 0 && <p className="muted">No proposals in this view.</p>}
             {proposals.map((p) => {
-              const tier = simulateTier(p.impact_score, p.artifact_verified);
-              const reviews = Object.values(model.reviews).filter((r) => Number(r.proposal_id) === p.id);
+              const reviews = Object.values(model.reviews).filter((r) => r.proposal_id === p.id);
               return (
                 <article className="proposal glass" key={p.id}>
                   <header>
@@ -304,16 +294,16 @@ export default function App() {
                   </header>
                   <div className="proposal-grid">
                     <div className="pgauge">
-                      <Gauge value={p.impact_score} label="Impact" size={128} tone={tierColor(p.status.startsWith("APPROVED") || p.status === "FULLY_PAID" ? "APPROVED_FULL" : tier.tier)} />
+                      <Gauge value={p.impact_score} label="Impact" size={128} tone={tierColor(p.status)} />
                     </div>
                     <dl className="kv">
                       <div><dt>Requested</dt><dd>{p.requested_tokens.toLocaleString()}</dd></div>
-                      <div><dt>Credited</dt><dd>{p.credited_tokens.toLocaleString()}</dd></div>
-                      <div><dt>Remaining</dt><dd>{p.remaining_tokens.toLocaleString()}</dd></div>
-                      <div><dt>Artifact</dt><dd>{p.artifact_verified ? "verified" : "unverified"}</dd></div>
-                      <div><dt>Tier</dt><dd style={{ color: tierColor(tier.tier) }}>{tier.tier}</dd></div>
-                      <div><dt>Upvotes</dt><dd>{p.upvotes}</dd></div>
-                      <div><dt>Multiplier</dt><dd>{(p.conviction_multiplier / 1000).toFixed(3)}x</dd></div>
+                      <div><dt>Approved payout</dt><dd>{p.credited_tokens.toLocaleString()}</dd></div>
+                      <div><dt>Impact score</dt><dd>{p.impact_score}</dd></div>
+                      <div><dt>Endorsements</dt><dd>{p.upvotes}</dd></div>
+                      <div><dt>Red flags</dt><dd>{p.red_flags}</dd></div>
+                      <div><dt>Reviews</dt><dd>{p.review_count}</dd></div>
+                      <div><dt>Status</dt><dd style={{ color: tierColor(p.status) }}>{p.status}</dd></div>
                       <div><dt>Proof URL</dt><dd className="url" title={p.proof_url}>{p.proof_url}</dd></div>
                     </dl>
                   </div>
@@ -321,27 +311,28 @@ export default function App() {
                   {reviews.length > 0 && (
                     <ul className="reviews">
                       {reviews.map((r) => (
-                        <li key={r.id}>
-                          score {r.review_score}{r.contains_red_flag ? " · RED FLAG" : ""} · {r.summary}
-                        </li>
+                        <li key={r.id}>{r.handle || shortAddr(r.delegate)} · {r.stance}{r.contains_red_flag ? " · RED FLAG" : ""} · helpful {r.helpful} · {r.summary}</li>
                       ))}
                     </ul>
                   )}
                   <div className="row">
-                    <button disabled={busy} className="ghost" onClick={() => run(() => write("audit_grant_live", [p.id]), `live audit #${p.id}`)}>
-                      <ShieldCheck size={14} /> Live AI Audit
-                    </button>
+                    {p.status === STATUS.SCREENING && (
+                      <button disabled={busy} className="ghost" onClick={() => run(() => write("audit_grant_live", [BigInt(p.id)]), `live audit #${p.id}`)}>
+                        <ShieldCheck size={14} /> Live AI Audit
+                      </button>
+                    )}
                     {reviews.length > 0 && (
-                      <button disabled={busy} className="ghost" onClick={() => run(() => write("upvote_delegate_review", [Number(reviews[0].id)]), `upvote review #${reviews[0].id}`)}>
+                      <button disabled={busy} className="ghost" onClick={() => run(() => write("upvote_delegate_review", [BigInt(reviews[0].id)]), `upvote review #${reviews[0].id}`)}>
                         <ArrowUp size={14} /> Upvote Review #{reviews[0].id}
                       </button>
                     )}
-                    {p.status === "APPROVED_FUNDED" || p.status === "PARTIALLY_FUNDED" ? (
-                      <button disabled={busy} className="primary" onClick={() => run(() => write("claim_grant_payout", [p.id]), `claim #${p.id}`)}>
+                    {(p.status === STATUS.APPROVED || p.status === STATUS.PARTIAL) && (
+                      <button disabled={busy} className="primary" onClick={() => run(() => write("claim_grant_payout", []), "claim payout")}>
                         <Coins size={14} /> Claim Payout
                       </button>
-                    ) : (
-                      <button disabled={busy} className="ghost" onClick={() => run(() => write("withdraw_proposal", [p.id]), `withdraw #${p.id}`)}>
+                    )}
+                    {p.status === STATUS.SCREENING && (
+                      <button disabled={busy} className="ghost" onClick={() => run(() => write("withdraw_proposal", [BigInt(p.id)]), `withdraw #${p.id}`)}>
                         <X size={14} /> Withdraw
                       </button>
                     )}
@@ -356,18 +347,18 @@ export default function App() {
         <aside className="side">
           <section className="glass panel">
             <h2><FileSignature size={16} className="accent" /> Submit Grant Proposal</h2>
-            <label>Title<input value={form.title} onChange={setF("title")} placeholder="Public goods milestone" /></label>
-            <label>Category<select value={form.category} onChange={setF("category")}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
-            <label>Manifest<textarea rows={3} value={form.manifest} onChange={setF("manifest")} placeholder="Plain text, no markup" /></label>
+            <label>Project title<input value={form.project_title} onChange={setF("project_title")} placeholder="Public goods milestone" /></label>
+            <label>Category<select value={form.public_good_category} onChange={setF("public_good_category")}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></label>
+            <label>Deliverable manifest<textarea rows={3} value={form.deliverable_manifest} onChange={setF("deliverable_manifest")} placeholder="Plain text, no markup" /></label>
             <label>Proof URL<input value={form.proof_url} onChange={setF("proof_url")} placeholder="https://..." /></label>
             <div className="two">
-              <label>Token<input value={form.token} onChange={setF("token")} /></label>
-              <label>Grant<input type="number" value={form.grant} onChange={setF("grant")} /></label>
+              <label>Token<input value={form.mandatory_artifact_token} onChange={setF("mandatory_artifact_token")} /></label>
+              <label>Requested grant<input type="number" value={form.requested_grant} onChange={setF("requested_grant")} /></label>
             </div>
             <div className="row wrap">
               <button className="ghost" onClick={quickFill} disabled={busy}><Sparkles size={14} /> Quick-Fill</button>
               <button className="danger" onClick={runGuard} disabled={busy}><ShieldAlert size={14} /> Test Security Guard</button>
-              <button className="primary" disabled={busy} onClick={() => run(() => write("submit_grant_proposal", [form.title, form.category, form.manifest, form.proof_url, form.token, Math.max(0, Math.floor(Number(form.grant) || 0))]), "submit proposal")}>
+              <button className="primary" disabled={busy} onClick={() => run(() => write("submit_grant_proposal", [form.project_title, form.public_good_category, form.deliverable_manifest, form.proof_url, form.mandatory_artifact_token, BigInt(Math.max(0, Math.floor(Number(form.requested_grant) || 0)))]), "submit proposal")}>
                 Submit
               </button>
             </div>
@@ -377,20 +368,16 @@ export default function App() {
             <h2><ShieldCheck size={16} className="accent" /> Submit Delegate Review</h2>
             <div className="two">
               <label>Proposal ID<input type="number" value={review.pid} onChange={setR("pid")} /></label>
-              <label>Score (1-100)<input type="number" value={review.score} onChange={setR("score")} /></label>
+              <label>Delegate handle<input value={review.handle} onChange={setR("handle")} /></label>
             </div>
-            <label>Risk flags<input value={review.risk} onChange={setR("risk")} placeholder="none" /></label>
-            <label>Summary<input value={review.note} onChange={setR("note")} placeholder="Delegate assessment" /></label>
-            <label className="check">
-              <input type="checkbox" checked={review.artifact} onChange={(e) => setReview({ ...review, artifact: e.target.checked })} />
-              Artifact verified
-            </label>
+            <label>Verdict stance<select value={review.stance} onChange={setR("stance")}>{STANCES.map((s) => <option key={s}>{s}</option>)}</select></label>
+            <label>Rationale<textarea rows={2} value={review.rationale} onChange={setR("rationale")} placeholder="Delegate assessment" /></label>
             <div className="row">
-              <button className="primary" disabled={busy} onClick={() => run(() => write("submit_delegate_review", [Math.max(0, Math.floor(Number(review.pid) || 0)), Math.max(0, Math.floor(Number(review.score) || 0)), review.risk || "none", review.artifact, review.note || "delegate review"]), "submit review")}>
+              <button className="primary" disabled={busy} onClick={() => run(() => write("submit_delegate_review", [BigInt(Math.max(0, Math.floor(Number(review.pid) || 0))), review.handle, review.stance, review.rationale || "review"]), "submit review")}>
                 Submit Review
               </button>
-              <button className="ghost" disabled={busy} onClick={() => run(() => write("upvote_delegate_review", [Math.max(0, Math.floor(Number(review.pid) || 0))]), "upvote review")}>
-                <ArrowUp size={14} /> Upvote Review
+              <button className="ghost" disabled={busy} onClick={() => run(() => write("upvote_delegate_review", [BigInt(Math.max(0, Math.floor(Number(review.pid) || 0)))]), "upvote review")}>
+                <ArrowUp size={14} /> Upvote (by ID)
               </button>
             </div>
           </section>

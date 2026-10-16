@@ -5,7 +5,7 @@ import { simulateTier } from "../config";
 export default function ConsensusInspector({ proposal }) {
   if (!proposal) return null;
   const p = proposal;
-  const tier = simulateTier(p.impact_score, p.artifact_verified);
+  const tier = simulateTier(p.impact_score, p.upvotes, p.red_flags, p.artifact_verified);
   const defused = /(<\/?untrusted_data|<\/?SENTINEL_USER_TEXT)/i.test(p.grant_manifest) ? "would be defused" : "clean";
 
   const stages = [
@@ -42,8 +42,8 @@ export default function ConsensusInspector({ proposal }) {
     {
       icon: Coins,
       name: "Deterministic settlement",
-      detail: `Tier ${tier.tier} · ${p.remaining_tokens} remaining · red-flag -15 · unverified cap 70`,
-      note: `Conviction modifier: ${(p.conviction_multiplier ?? 1000) / 1000}x (range 1.000-1.500).`,
+      detail: `Status ${tier.status} · adjusted impact ${tier.impact} · red-flag -15 · endorse +5 · unverified cap 70`,
+      note: `Community signal: ${p.upvotes} endorsements vs ${p.red_flags} red-flag challenges.`,
     },
   ];
 
