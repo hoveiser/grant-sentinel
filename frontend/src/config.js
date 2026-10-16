@@ -5,35 +5,21 @@ export const CONTRACT_ADDRESS = "0x2736a79F03d36080e63FA2ab164F7E9151D03978";
 export const NETWORK = "studionet";
 export const CHAIN_ID = 61999;
 export const EXPLORER_URL = "https://genlayer-explorer.vercel.app";
-
-// Treasury starts at 50,000,000 virtual grant units.
 export const INITIAL_TREASURY = 50000000;
-
-export const CATEGORIES = [
-  "DEVELOPER_TOOLS",
-  "PROTOCOL_INFRA",
-  "AI_RESEARCH",
-  "ECOSYSTEM_GROWTH",
-];
-
+export const CATEGORIES = ["DEFI", "AI_INFRA", "SECURITY", "CLIMATE"];
 export const STANCES = ["ENDORSE_CONVICTION", "RED_FLAG_CHALLENGE", "TECHNICAL_NOTE"];
 
-// Mirrors the contract disbursement rules for the off-chain simulator only.
-export function simulateTier(score, endorsements, redFlags, requestedGrant) {
-  let impact = Math.max(0, Math.min(100, Math.floor(score)));
-  if (redFlags > endorsements) {
-    impact = Math.max(0, impact - 15);
-  } else if (endorsements > redFlags) {
-    impact = Math.min(100, impact + 5);
-  }
-  let status = "REJECTED";
-  let payout = 0;
-  if (impact >= 75) {
-    status = "APPROVED_FUNDED";
-    payout = requestedGrant;
-  } else if (impact >= 45) {
-    status = "PARTIAL_GRANT";
-    payout = Math.floor((requestedGrant * impact) / 100);
-  }
-  return { impact, status, payout };
+// Mirror of the contract tiering rules for the simulator and inspector.
+export function simulateTier(score, artifactVerified = true) {
+  let s = Math.max(0, Math.min(100, Math.round(score || 0)));
+  if (!artifactVerified && s > 70) s = 70;
+  if (s >= 75) return { tier: "APPROVED_FULL", fraction: 75, score: s };
+  if (s >= 45) return { tier: "APPROVED_PARTIAL", fraction: 45, score: s };
+  return { tier: "REJECTED", fraction: 0, score: s };
+}
+
+export function shortAddr(a) {
+  if (!a) return "";
+  const s = String(a);
+  return s.length > 14 ? `${s.slice(0, 8)}...${s.slice(-4)}` : s;
 }
