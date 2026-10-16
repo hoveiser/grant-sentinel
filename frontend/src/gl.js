@@ -20,13 +20,13 @@ export function getOrCreateBurner() {
     pk = generatePrivateKey();
     localStorage.setItem(BURNER_KEY_STORAGE, pk);
   }
-  return createAccount({ privateKey: pk });
+  return createAccount(pk);
 }
 
 export function rotateBurner() {
   const pk = generatePrivateKey();
   localStorage.setItem(BURNER_KEY_STORAGE, pk);
-  return createAccount({ privateKey: pk });
+  return createAccount(pk);
 }
 
 export function writeClient(account) {
