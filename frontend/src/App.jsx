@@ -3,7 +3,7 @@ import {
   connectIdentity, disconnectIdentity, readModel, write, switchToBurner,
   connectMetaMask, isBurnerActive, shortAddr,
 } from "./gl";
-import { CONTRACT_ADDRESS, CATEGORIES, STANCES, STATUS, simulateTier } from "./config";
+import { CONTRACT_ADDRESS, CATEGORIES, STANCES, STATUS, TOKEN_SYMBOL, TX_TYPES, simulateTier } from "./config";
 import Gauge from "./components/Gauge";
 import BackgroundMesh from "./components/BackgroundMesh";
 import ConsensusInspector from "./components/ConsensusInspector";
@@ -12,6 +12,7 @@ import { celebrateFinalized } from "./lib/fx";
 import {
   Wallet, RefreshCw, Sparkles, ShieldCheck, ShieldAlert, Volume2, VolumeX,
   Sliders, Activity, FileSignature, ArrowUp, ScanSearch, Coins, X, ChevronRight,
+  Landmark, ArrowLeftRight, HandCoins,
 } from "lucide-react";
 
 function tierColor(status) {
@@ -22,17 +23,16 @@ function tierColor(status) {
   return "#60d2d6"; // SCREENING
 }
 
-// Interactive payout & consensus simulator mirroring _apply_verdict() exactly.
-function Simulator({ budget }) {
+// Interactive payout & consensus simulator mirroring the on-chain run_audit math.
+function Simulator() {
   const [score, setScore] = useState(82);
   const [endorsed, setEndorsed] = useState(2);
   const [redFlags, setRedFlags] = useState(0);
   const [requested, setRequested] = useState(120000);
   const [artifact, setArtifact] = useState(true);
 
-  const tier = simulateTier(score, endorsed, redFlags, artifact);
-  const rawPayout = Math.floor(requested * tier.fraction);
-  const payout = Math.min(rawPayout, budget);
+  const tier = simulateTier(score, endorsed, redFlags, artifact, requested);
+  const payout = tier.approvedPayout;
 
   return (
     <div className="simulator glass">
@@ -40,11 +40,11 @@ function Simulator({ budget }) {
         <Sliders size={16} className="accent" />
         <h3>Payout &amp; Consensus What-If Simulator</h3>
       </div>
-      <p className="muted small">Drag the sliders to preview the exact on-chain settlement math (conviction modifier, unverified cap, tiers) before submitting a transaction.</p>
+      <p className="muted small">Preview the exact on-chain settlement math (5-point score grid, conviction modifier, unverified cap, funded tiers) before submitting a transaction. Validators must agree on the identical quantized score and the exact credited payout.</p>
       <div className="sim-body">
         <div className="sim-controls">
           <label className="slider">
-            <span>AI verified impact score <b>{score}</b></span>
+            <span>Raw AI impact score <b>{score}</b></span>
             <input type="range" min="0" max="100" value={score} onChange={(e) => { setScore(Number(e.target.value)); click(); }} />
           </label>
           <label className="slider">
@@ -66,7 +66,7 @@ function Simulator({ budget }) {
           </div>
         </div>
         <div className="sim-viz">
-          <Gauge value={tier.impact} label="Adjusted Impact" tone={tierColor(tier.status)} />
+          <Gauge value={tier.impact} label="Quantized Impact" tone={tierColor(tier.status)} />
           <div className="tier-bar">
             <div className="tier-track">
               <span className="seg reject" style={{ width: "45%" }} />
@@ -75,13 +75,13 @@ function Simulator({ budget }) {
               <span className="marker" style={{ left: `${tier.impact}%` }} title={`impact ${tier.impact}`} />
             </div>
             <div className="tier-legend">
-              <span>0-44 REJECTED</span><span>45-74 PARTIAL</span><span>75-100 APPROVED</span>
+              <span>0-44 REJECTED</span><span>45-70 PARTIAL</span><span>75-100 APPROVED</span>
             </div>
           </div>
           <div className="sim-out">
             <div><span>Settlement status</span><b style={{ color: tierColor(tier.status) }}>{tier.status}</b></div>
-            <div><span>Adjusted impact</span><b>{tier.impact}</b></div>
-            <div><span>Projected payout</span><b>{payout.toLocaleString()} / {requested.toLocaleString()}</b></div>
+            <div><span>Quantized score</span><b>{tier.impact}</b></div>
+            <div><span>Exact approved payout</span><b>{payout.toLocaleString()} {TOKEN_SYMBOL}</b></div>
           </div>
         </div>
       </div>
@@ -103,16 +103,18 @@ export default function App() {
     proof_url: "", mandatory_artifact_token: "v2", requested_grant: 120000,
   });
   const [review, setReview] = useState({ pid: 1, handle: "sentinel-delegate", stance: "TECHNICAL_NOTE", rationale: "" });
+  const [depositAmt, setDepositAmt] = useState(100000);
+  const [xfer, setXfer] = useState({ to: "", amount: 1000 });
 
   const addLine = useCallback((line) => setLog((prev) => [...prev.slice(-60), line]), []);
 
   const refresh = useCallback(async () => {
     try {
-      setModel(await readModel());
+      setModel(await readModel(address));
     } catch (e) {
       addLine(`read failed: ${String(e.message || e).slice(0, 90)}`);
     }
-  }, [addLine]);
+  }, [addLine, address]);
 
   useEffect(() => {
     setAddress(connectIdentity()?.address || null);
@@ -259,15 +261,16 @@ export default function App() {
         <main>
           {model && (
             <div className="treasury-row">
-              <div className="stat glass"><span>Treasury Budget</span><b>{model.treasury_budget.toLocaleString()}</b></div>
-              <div className="stat glass"><span>Total Granted</span><b>{model.total_credited_tokens.toLocaleString()}</b></div>
-              <div className="stat glass"><span>Ungranted Pool</span><b>{(model.treasury_budget - model.total_credited_tokens).toLocaleString()}</b></div>
-              <div className="stat glass"><span>Proposals</span><b>{model.next_proposal_id - 1}</b></div>
-              <div className="stat glass"><span>Reviews</span><b>{model.next_review_id - 1}</b></div>
+              <div className="stat glass"><span>Custody Vault ({TOKEN_SYMBOL})</span><b>{model.vault_custody_balance.toLocaleString()}</b></div>
+              <div className="stat glass"><span>Unclaimed Reserved Escrow</span><b>{model.total_allocated_unclaimed.toLocaleString()}</b></div>
+              <div className="stat glass"><span>Unencumbered Custody</span><b>{model.unencumbered_custody.toLocaleString()}</b></div>
+              <div className="stat glass"><span>Total Disbursed</span><b>{model.total_disbursed.toLocaleString()}</b></div>
+              <div className="stat glass"><span>My Wallet ({TOKEN_SYMBOL})</span><b>{(model.wallet_balance || 0).toLocaleString()}</b></div>
+              <div className="stat glass"><span>My Claimable</span><b>{(model.wallet_claimable || 0).toLocaleString()}</b></div>
             </div>
           )}
 
-          <Simulator budget={model ? Math.max(0, model.treasury_budget - model.total_credited_tokens) : 50000000} />
+          <Simulator />
 
           <div className="tabs">
             {[["all", "All"], ["active", "Screening"], ["approved", "Funded"], ["rejected", "Rejected / Withdrawn"]].map(([k, lbl]) => (
@@ -326,10 +329,13 @@ export default function App() {
                         <ArrowUp size={14} /> Upvote Review #{reviews[0].id}
                       </button>
                     )}
-                    {(p.status === STATUS.APPROVED || p.status === STATUS.PARTIAL) && (
-                      <button disabled={busy} className="primary" onClick={() => run(() => write("claim_grant_payout", []), "claim payout")}>
-                        <Coins size={14} /> Claim Payout
+                    {(p.status === STATUS.APPROVED || p.status === STATUS.PARTIAL) && !p.claimed && address && p.applicant && p.applicant.toLowerCase() === address.toLowerCase() && (
+                      <button disabled={busy} className="primary" onClick={() => run(() => write("claim_grant_payout", [BigInt(p.id)]), `claim payout #${p.id}`)}>
+                        <HandCoins size={14} /> Claim Grant to Wallet
                       </button>
+                    )}
+                    {(p.status === STATUS.APPROVED || p.status === STATUS.PARTIAL) && p.claimed && (
+                      <span className="chip">claimed</span>
                     )}
                     {p.status === STATUS.SCREENING && (
                       <button disabled={busy} className="ghost" onClick={() => run(() => write("withdraw_proposal", [BigInt(p.id)]), `withdraw #${p.id}`)}>
@@ -383,6 +389,45 @@ export default function App() {
           </section>
 
           <section className="glass panel">
+            <h2><Landmark size={16} className="accent" /> Funded Custody &amp; SGT Transfers</h2>
+            <p className="muted small">The vault holds real transferable Sentinel Grant Tokens. Deposit from your own wallet balance, claim an approved grant into your wallet, or move claimed SGT to any address.</p>
+            <label>Fund custody amount ({TOKEN_SYMBOL})<input type="number" min="1" value={depositAmt} onChange={(e) => setDepositAmt(Number(e.target.value))} /></label>
+            <div className="row">
+              <button className="primary" disabled={busy || !address || depositAmt <= 0} onClick={() => run(() => write("deposit_treasury_funds", [BigInt(Math.floor(depositAmt))]), "fund custody")}>
+                <Landmark size={14} /> Fund Treasury Custody
+              </button>
+            </div>
+            <div className="two">
+              <label>Transfer recipient<input value={xfer.to} onChange={(e) => setXfer({ ...xfer, to: e.target.value })} placeholder="0x..." /></label>
+              <label>Amount ({TOKEN_SYMBOL})<input type="number" min="1" value={xfer.amount} onChange={(e) => setXfer({ ...xfer, amount: Number(e.target.value) })} /></label>
+            </div>
+            <div className="row">
+              <button className="ghost" disabled={busy || !address || !xfer.to || xfer.amount <= 0} onClick={() => run(() => write("transfer_grant_tokens", [xfer.to, BigInt(Math.floor(xfer.amount))]), "transfer SGT")}>
+                <ArrowLeftRight size={14} /> Transfer Claimed SGT
+              </button>
+            </div>
+          </section>
+
+          <section className="glass panel">
+            <h2><Coins size={16} className="accent" /> On-Chain Custody &amp; Transfer Ledger</h2>
+            <div className="ledger">
+              {!model || model.receipts.length === 0 ? (
+                <span className="muted">No custody movements recorded yet.</span>
+              ) : (
+                <ul>
+                  {model.receipts.map((r) => (
+                    <li key={r.id}>
+                      <span className={`ledger-kind kind-${r.tx_type}`}>{r.tx_type.replace(/_/g, " ")}</span>
+                      <b>{r.amount.toLocaleString()} {TOKEN_SYMBOL}</b>
+                      <span className="muted small">{r.proposal_id ? `#${r.proposal_id} ` : ""}to {shortAddr(r.recipient)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+
+          <section className="glass panel">
             <h2 className="loghead"><ChevronRight size={16} className="accent" /> Transaction Log</h2>
             <div className="log">
               {log.length === 0 && <span className="muted">No transactions yet.</span>}
@@ -393,8 +438,9 @@ export default function App() {
       </div>
 
       <footer className="foot muted small">
-        GrantSentinel · GenLayer Intelligent Contract on studionet (chain 61999) · every fund transfer gated by
-        gl.nondet.web.render evidence and gl.eq_principle.prompt_comparative validator consensus.
+        GrantSentinel · GenLayer Intelligent Contract on studionet (chain 61999) · every payout is gated by
+        gl.nondet.web.render evidence and gl.eq_principle.prompt_comparative validator consensus on the exact credited
+        amount, reserved from a funded custody vault and delivered to applicant wallets as transferable SGT.
       </footer>
     </div>
   );

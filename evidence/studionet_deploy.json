@@ -1,103 +1,166 @@
 {
   "chain_id": 61999,
   "network": "studionet",
-  "contract_address": "0x2736a79F03d36080e63FA2ab164F7E9151D03978",
+  "contract_address": "0x8d256ce6Af9Fa9419b82F3E2555aB742b341D6bD",
   "owner": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
-  "deploy_tx": "0x00ad0c613c8352b30e3d75414b93128a80167b5cfa54cb2a65327c5461d8498c",
+  "signer2": "0x84B42CFC0a00cf0530657F6021D58B10DE7a0156",
+  "signer3": "0xD48761955B69d6EA5f0fc5c62CACA99198663C9c",
+  "deploy_tx": "0x6eebb24b3e33110ff8932edfd61586a00b37befb60b50ac4272640d76e61b649",
   "transactions": {
-    "deploy": "0x00ad0c613c8352b30e3d75414b93128a80167b5cfa54cb2a65327c5461d8498c",
-    "proposal_1": "0x6980103c9be56f00bfbdfde725338606ec111147942554328935fd33c4491659",
-    "proposal_2": "0x7ca117848c8600abb23a24f8b65e0646db343d73f910c058868dafa4706fc284",
-    "review_endorse_p1": "0xa357524aec872a79ca679cf0aede277bd5d65632abb471d72487c043175b8136",
-    "review_flag_p1": "0xfee721d62d30adc1c47b3bb9d74b83ec0d8272131eb88331976316eb8a63bf28",
-    "review_endorse_p2": "0xc7c81f78616994c3fd4c911a8bb17cb704e9d453a39f003117325c1003312774",
-    "upvote_1": "0xc2bdb2f582214d7b8e0ffefb2d47a0df1ddbeea27079297c158715c4423dc4e1",
-    "audit_live_1": "0xa1c2a2c018252da9dded00d68ea08242bfed2747feeff85075c95c5417c517e6",
-    "audit_det_2": "0x15abc3bbbc8e10789c7be54cd3f8ab572017d35ffc572b5bcdf4410e52eddf7e",
-    "claim_owner": "0x1f72b518cc8489eaf3cec4299c3b46ec37a954f32582b56d39053b6642c31226",
-    "rollback_self_review": "0xc5ffd7c17837f2df65008fea0844d56dafbb365eb539f1925a20a878874a0544"
+    "deploy": "0x6eebb24b3e33110ff8932edfd61586a00b37befb60b50ac4272640d76e61b649",
+    "deposit": "0xc59aceb512d23fd14e3d6e516a914b8441b43c9d0bf6d1cd6ea6870160088853",
+    "proposal_1": "0x8dd55ba1eea31753b1268a1d98ffb2b001ebada765b5e4a910f1c27b83ae6a5a",
+    "proposal_2": "0x0dbf7e0a6409478d602dd578ecf80b6e61219e82f51f1ee1e5e4d8cb595f6712",
+    "review_endorse_p1": "0x6cc28e6fb5b1e0e8b6575b1db85be3e5da1b0b254935c65fb7fb191c7adc63a1",
+    "review_note_p1": "0x31ee249b48ada04b41a743af3fb4c327d2d4463a9554687c89bf2eb829b00b67",
+    "upvote_1": "0xc251ee5920cabbbfd9d362c8038c010a7a7f0d5faa6116d745988f179c1e989f",
+    "audit_live_1": "0x09b61372b9de678b99582d6ee633c033881bde2f47f1c8cf16fce9840f758730",
+    "claim_1": "0x82fcf399751c174f9fdb00c94f9a6cab14583318ba4b6e3b6765a80f2cb38dcf",
+    "transfer_1": "0x58f16108670240b53c45c9494fc52241eae0d1f88beeb7415c19d6a2eeaf5aa8",
+    "rollback_self_review": "0x640101f97f36fccc9070d72b31c693f902567d8e8b51639a05560b31936fdded"
   },
   "rollback_execution_failed": true,
   "summary": {
     "approved_count": 1,
     "partial_count": 0,
     "proposal_count": 2,
-    "rejected_count": 1,
-    "review_count": 3,
-    "screening_count": 0,
-    "total_granted": 90000,
-    "treasury_budget": 49910000,
+    "receipt_count": 4,
+    "rejected_count": 0,
+    "review_count": 2,
+    "screening_count": 1,
+    "total_allocated_unclaimed": 0,
+    "total_disbursed": 200000,
+    "total_supply": 100000000,
+    "unencumbered_custody": 50800000,
+    "vault_custody_balance": 50800000,
     "withdrawn_count": 0
   },
   "proposal1": {
     "applicant": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
-    "approved_payout": 0,
+    "approved_payout": 200000,
+    "claimed": true,
     "conviction_endorsements": 1,
-    "deliverable_manifest": "Ship audited PLONK prover with docs, tests and CI for public use.",
-    "mandatory_artifact_token": "SENTINEL-ZK-2026",
-    "project_title": "ZK Open-Source Prover Library",
-    "proof_url": "https://example.com/",
+    "deliverable_manifest": "Grant to keep the world's largest free, ad-free encyclopedia running and open: server costs, edit-time tooling and community moderation for a public good every researcher on earth depends on.",
+    "mandatory_artifact_token": "Wikipedia",
+    "project_title": "Sustain the Wikipedia Free-Encyclopedia Commons",
+    "proof_url": "https://www.wikipedia.org/",
     "proposal_id": 1,
-    "public_good_category": "DEVELOPER_TOOLS",
-    "red_flag_challenges": 1,
-    "requested_grant": 120000,
+    "public_good_category": "ECOSYSTEM_GROWTH",
+    "red_flag_challenges": 0,
+    "requested_grant": 200000,
     "review_count": 2,
-    "sentinel_audit_report": "Audit failed. The submitted evidence contains generic placeholder documentation text in multiple languages and fails to include the mandatory artifact token 'SENTINEL-ZK-2026'. There is no evidence of a ZK Open-Source Prover Library, PLONK implementation, documentation, or CI configuration. The submission appears to be a placeholder or incorrect link.",
-    "status": "REJECTED",
-    "verified_impact_score": 0
+    "sentinel_audit_report": "\u8bc1\u636e\u9875\u660e\u786e\u5c55\u793a Wikipedia \u53ca\u5176\u4f5c\u4e3a\u514d\u8d39\u3001\u5f00\u653e\u3001\u975e\u8425\u5229\u77e5\u8bc6\u5e73\u53f0\u7684\u8fd0\u884c\u72b6\u6001\uff0c\u5305\u542b\u591a\u8bed\u8a00\u5185\u5bb9\u3001\u793e\u533a\u751f\u6001\u548c\u6301\u7eed\u7b79\u8d44\u4fe1\u606f\uff0c\u4e0e\u7ef4\u6301\u670d\u52a1\u5668\u3001\u5de5\u5177\u548c\u793e\u533a\u8fd0\u8425\u7684\u516c\u5171\u7269\u54c1\u76ee\u6807\u9ad8\u5ea6\u4e00\u81f4\u3002\u4f46\u9875\u9762\u672a\u63d0\u4f9b\u5177\u4f53\u9884\u7b97\u3001\u8d44\u91d1\u4f7f\u7528\u660e\u7ec6\u6216\u53ef\u91cf\u5316\u6210\u679c\uff0c\u5f71\u54cd\u8bc4\u5206\u7565\u4f5c\u4fdd\u7559\u3002",
+    "status": "APPROVED_FUNDED",
+    "verified_impact_score": 100
   },
   "proposal2": {
     "applicant": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
-    "approved_payout": 90000,
-    "conviction_endorsements": 1,
-    "deliverable_manifest": "Public indexer exposing mempool analytics API for researchers.",
-    "mandatory_artifact_token": "SENTINEL-MEV-2026",
-    "project_title": "Realtime MEV-Watch Indexer",
-    "proof_url": "https://example.com/",
+    "approved_payout": 0,
+    "claimed": false,
+    "conviction_endorsements": 0,
+    "deliverable_manifest": "Public mempool analytics API for researchers, with a reproducible open data pipeline.",
+    "mandatory_artifact_token": "MEV-WATCH-TOKEN",
+    "project_title": "Realtime MEV-Watch Public Indexer",
+    "proof_url": "https://example.org/",
     "proposal_id": 2,
     "public_good_category": "PROTOCOL_INFRA",
     "red_flag_challenges": 0,
     "requested_grant": 90000,
-    "review_count": 1,
-    "sentinel_audit_report": "Owner-verified score after re-checking the indexer proof.",
+    "review_count": 0,
+    "sentinel_audit_report": "",
+    "status": "SCREENING",
+    "verified_impact_score": 0
+  },
+  "claimed_proposal_id": 1,
+  "claimed_proposal": {
+    "applicant": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
+    "approved_payout": 200000,
+    "claimed": true,
+    "conviction_endorsements": 1,
+    "deliverable_manifest": "Grant to keep the world's largest free, ad-free encyclopedia running and open: server costs, edit-time tooling and community moderation for a public good every researcher on earth depends on.",
+    "mandatory_artifact_token": "Wikipedia",
+    "project_title": "Sustain the Wikipedia Free-Encyclopedia Commons",
+    "proof_url": "https://www.wikipedia.org/",
+    "proposal_id": 1,
+    "public_good_category": "ECOSYSTEM_GROWTH",
+    "red_flag_challenges": 0,
+    "requested_grant": 200000,
+    "review_count": 2,
+    "sentinel_audit_report": "\u8bc1\u636e\u9875\u660e\u786e\u5c55\u793a Wikipedia \u53ca\u5176\u4f5c\u4e3a\u514d\u8d39\u3001\u5f00\u653e\u3001\u975e\u8425\u5229\u77e5\u8bc6\u5e73\u53f0\u7684\u8fd0\u884c\u72b6\u6001\uff0c\u5305\u542b\u591a\u8bed\u8a00\u5185\u5bb9\u3001\u793e\u533a\u751f\u6001\u548c\u6301\u7eed\u7b79\u8d44\u4fe1\u606f\uff0c\u4e0e\u7ef4\u6301\u670d\u52a1\u5668\u3001\u5de5\u5177\u548c\u793e\u533a\u8fd0\u8425\u7684\u516c\u5171\u7269\u54c1\u76ee\u6807\u9ad8\u5ea6\u4e00\u81f4\u3002\u4f46\u9875\u9762\u672a\u63d0\u4f9b\u5177\u4f53\u9884\u7b97\u3001\u8d44\u91d1\u4f7f\u7528\u660e\u7ec6\u6216\u53ef\u91cf\u5316\u6210\u679c\uff0c\u5f71\u54cd\u8bc4\u5206\u7565\u4f5c\u4fdd\u7559\u3002",
     "status": "APPROVED_FUNDED",
-    "verified_impact_score": 87
+    "verified_impact_score": 100
   },
   "reviews_proposal1": [
     {
-      "delegate": "0x958288f6baBA6a2baBb0bE6f3a2137b0B78204b0",
+      "delegate": "0x84B42CFC0a00cf0530657F6021D58B10DE7a0156",
       "delegate_handle": "sentinel-delegate-oveis",
       "helpful_votes": 1,
       "proposal_id": 1,
-      "rationale": "Reproducible build, tests pass locally, deliverable matches manifest.",
+      "rationale": "Reproducible build, tests pass locally, deliverable matches the manifest.",
       "review_id": 1,
       "verdict_stance": "ENDORSE_CONVICTION"
     },
     {
-      "delegate": "0x993199Fd343bF74525D122594Ae3620C64B17d5c",
+      "delegate": "0xD48761955B69d6EA5f0fc5c62CACA99198663C9c",
       "delegate_handle": "tech-reviewer-ada",
       "helpful_votes": 0,
       "proposal_id": 1,
-      "rationale": "License not declared yet; flagging for the maintainers to resolve.",
+      "rationale": "Documentation is thorough; a note for future license clarity.",
       "review_id": 2,
-      "verdict_stance": "RED_FLAG_CHALLENGE"
+      "verdict_stance": "TECHNICAL_NOTE"
     }
   ],
   "leaderboard": [
     {
-      "delegate": "0x958288f6baBA6a2baBb0bE6f3a2137b0B78204b0",
-      "reputation": 28
+      "delegate": "0x84B42CFC0a00cf0530657F6021D58B10DE7a0156",
+      "reputation": 16
     },
     {
-      "delegate": "0x993199Fd343bF74525D122594Ae3620C64B17d5c",
+      "delegate": "0xD48761955B69d6EA5f0fc5c62CACA99198663C9c",
       "reputation": 12
     }
   ],
-  "treasury_invariant": true,
+  "transfer_ledger": [
+    {
+      "amount": 50000000,
+      "proposal_id": 0,
+      "receipt_id": 1,
+      "recipient": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
+      "tx_type": "TREASURY_DEPOSIT"
+    },
+    {
+      "amount": 1000000,
+      "proposal_id": 0,
+      "receipt_id": 2,
+      "recipient": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
+      "tx_type": "TREASURY_DEPOSIT"
+    },
+    {
+      "amount": 200000,
+      "proposal_id": 1,
+      "receipt_id": 3,
+      "recipient": "0x3de43AA2f7162c80af98abe78222aE0Cdf83c506",
+      "tx_type": "GRANT_DISBURSEMENT"
+    },
+    {
+      "amount": 5000,
+      "proposal_id": 0,
+      "receipt_id": 4,
+      "recipient": "0x84B42CFC0a00cf0530657F6021D58B10DE7a0156",
+      "tx_type": "TOKEN_TRANSFER"
+    }
+  ],
+  "wallets": {
+    "owner": 49195000,
+    "signer2": 5000
+  },
+  "custody_conserved": true,
+  "reservation_ok": true,
+  "live_audit_claimed_payout": 200000,
   "identity": {
-    "local_file_sha256": "68f3b74b79b162d28d8f04c3a02954e385b46adf7709aaf4b01ee691eda4e7fa",
-    "submitted_bytes_sha256": "68f3b74b79b162d28d8f04c3a02954e385b46adf7709aaf4b01ee691eda4e7fa",
-    "onchain_readback_sha256": "68f3b74b79b162d28d8f04c3a02954e385b46adf7709aaf4b01ee691eda4e7fa"
+    "local_file_sha256": "754dfebc50f7b107fabdbd945d359830eec2e645302353f44322b4aa0e73d3d3",
+    "submitted_bytes_sha256": "754dfebc50f7b107fabdbd945d359830eec2e645302353f44322b4aa0e73d3d3",
+    "onchain_readback_sha256": "754dfebc50f7b107fabdbd945d359830eec2e645302353f44322b4aa0e73d3d3"
   },
   "identity_pass": true
 }

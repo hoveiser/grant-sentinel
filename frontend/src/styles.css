@@ -95,7 +95,7 @@ button.icon-btn.on { background: rgba(34, 160, 168, 0.28); color: var(--teal-bri
 .addrbar code { color: var(--teal-bright); font-size: 13px; }
 .callout { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; margin-bottom: 14px; font-size: 13px; line-height: 1.5; }
 
-.treasury-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 18px; }
+.treasury-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; }
 .stat { padding: 14px; display: flex; flex-direction: column; gap: 6px; }
 .stat span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
 .stat b { font-size: 20px; color: var(--teal-bright); font-variant-numeric: tabular-nums; }
@@ -189,6 +189,16 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--t
 .log { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow: auto; font-size: 11px; }
 .log span { font-family: ui-monospace, monospace; color: #c8d4e6; border-bottom: 1px dashed rgba(142, 163, 189, 0.15); padding-bottom: 3px; }
 .loghead { margin-bottom: 8px; }
+
+/* On-chain custody & transfer ledger */
+.ledger { max-height: 300px; overflow: auto; }
+.ledger ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ledger li { display: grid; grid-template-columns: auto auto 1fr; gap: 10px; align-items: baseline; padding: 6px 0; border-bottom: 1px dashed rgba(142, 163, 189, 0.15); }
+.ledger b { font-variant-numeric: tabular-nums; color: var(--ink); }
+.ledger-kind { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--card-brd); white-space: nowrap; }
+.kind-TREASURY_DEPOSIT { color: #60d2d6; }
+.kind-GRANT_DISBURSEMENT { color: #2fbf7a; }
+.kind-TOKEN_TRANSFER { color: #d6b25c; }
 
 .foot { margin-top: 28px; text-align: center; line-height: 1.6; }
 

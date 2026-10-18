@@ -9,11 +9,22 @@ from dataclasses import dataclass
 # On-chain boundary for a DAO treasury grant program.
 #   Frontend / off-chain owns: UI, wallet, previews, cached reads.
 #   Contract owns: proposal intake, delegate screening, the impact-adjusted
-#     disbursement decision (validators re-fetch the live proof URL), treasury
-#     accounting, and claimable payouts.
+#     disbursement decision (validators re-fetch the live proof URL and agree
+#     on the EXACT credited amount), funded custody accounting, the transferable
+#     Sentinel Grant Token (SGT) ledger, and real custody-to-wallet payouts.
 #   External proof URLs are untrusted input: normalized, delimiter-defused and
 #     truncated before the audit prompt, and every disbursement is bounded by
-#     deterministic floors, ceilings and tiers.
+#     deterministic floors, ceilings, a 5-point score grid and funded custody.
+#
+# Funded custody model:
+#   The contract holds a real custodied token balance (`vault_custody_balance`).
+#   Approved payouts are RESERVED against unencumbered custody at audit time and
+#   only move into the applicant's transferable `token_balances` when they call
+#   `claim_grant_payout`. Claimed SGT can then be moved to any wallet with
+#   `transfer_grant_tokens`. Total supply is always conserved:
+#       total_supply == vault_custody_balance + sum(all token_balances)
+#   There is NO owner/admin path that can approve or score a proposal without
+#   validator evidence consensus.
 # ---------------------------------------------------------------------------
 
 CATEGORIES = (
@@ -37,18 +48,33 @@ STATUS_WITHDRAWN = "WITHDRAWN"
 STANCE_ENDORSE = "ENDORSE_CONVICTION"
 STANCE_RED_FLAG = "RED_FLAG_CHALLENGE"
 
+TX_TREASURY_DEPOSIT = "TREASURY_DEPOSIT"
+TX_GRANT_DISBURSEMENT = "GRANT_DISBURSEMENT"
+TX_TOKEN_TRANSFER = "TOKEN_TRANSFER"
+
 GRANT_MIN = u256(100)
 GRANT_MAX = u256(5000000)
 SCORE_MAX = u256(100)
+SCORE_STEP = u256(5)
 TIER_FULL = u256(75)
 TIER_PARTIAL = u256(45)
 RED_FLAG_PENALTY = u256(15)
 ENDORSE_BONUS = u256(5)
 UNVERIFIED_CAP = u256(70)
+# On-grid representative score for each consensus-agreed funding band. The exact
+# credited amount is a deterministic function of the agreed band, so the amount
+# is fully bound to validator agreement and no single leader's raw score leaks
+# into the payout.
+PARTIAL_REPRESENTATIVE = u256(60)
 DELEGATE_REP = u256(12)
 UPVOTE_REP = u256(4)
 MAX_AUDIT_REPORT = 400
 MAX_SNIPPET = 5000
+
+# Genesis tokenomics: total SGT supply minted to the deployer wallet, of which
+# a portion is immediately locked into contract custody as funded treasury.
+TOTAL_SGT_SUPPLY = u256(100000000)
+INITIAL_CUSTODY = u256(50000000)
 
 ERROR_EXPECTED = "[EXPECTED]"
 
@@ -71,6 +97,7 @@ class GrantProposal:
     verified_impact_score: u256
     approved_payout: u256
     sentinel_audit_report: str
+    claimed: bool
 
 
 @allow_storage
@@ -83,6 +110,16 @@ class DelegateReview:
     verdict_stance: str
     rationale: str
     helpful_votes: u256
+
+
+@allow_storage
+@dataclass
+class PayoutReceipt:
+    receipt_id: u256
+    proposal_id: u256
+    recipient: Address
+    amount: u256
+    tx_type: str
 
 
 def _has_whitespace_or_control(text: str) -> bool:
@@ -146,6 +183,12 @@ def _clamp_score(raw: i256) -> u256:
     return u256(raw)
 
 
+def _snap_grid(value: u256) -> u256:
+    # Snap a clamped 0..100 score onto the deterministic 5-point step grid so
+    # every validator lands on an identical quantized_score integer.
+    return (value // SCORE_STEP) * SCORE_STEP
+
+
 def _coerce_score(value) -> i256:
     text = str(value).strip()
     result = 0
@@ -163,14 +206,72 @@ def _coerce_score(value) -> i256:
     return i256(result)
 
 
+def _to_u256(value) -> u256:
+    return u256(_coerce_score(value))
+
+
+def _finalize_impact(
+    raw_score: i256,
+    endorsements: u256,
+    red_flags: u256,
+    artifact_verified: bool,
+) -> u256:
+    # Deterministic pipeline executed identically by every validator inside the
+    # canonical audit payload: quantize raw score, apply community conviction
+    # modifier, then the mandatory artifact cap.
+    impact = _snap_grid(_clamp_score(raw_score))
+
+    if red_flags > endorsements:
+        if impact >= RED_FLAG_PENALTY:
+            impact = impact - RED_FLAG_PENALTY
+        else:
+            impact = u256(0)
+    elif endorsements > red_flags:
+        impact = impact + ENDORSE_BONUS
+        if impact > SCORE_MAX:
+            impact = SCORE_MAX
+
+    # Penalty and bonus are multiples of 5 and the cap is on-grid, so the result
+    # stays on the 5-point grid; snap once more defensively.
+    impact = _snap_grid(impact)
+
+    # Unverified artifact hard cap when the model still scored it high.
+    if artifact_verified is False and impact >= TIER_FULL:
+        impact = UNVERIFIED_CAP
+    return impact
+
+
+def _status_for(impact: u256) -> str:
+    if impact >= TIER_FULL:
+        return STATUS_APPROVED
+    if impact >= TIER_PARTIAL:
+        return STATUS_PARTIAL
+    return STATUS_REJECTED
+
+
+def _payout_for(impact: u256, requested_grant: u256) -> u256:
+    if impact >= TIER_FULL:
+        return requested_grant
+    if impact >= TIER_PARTIAL:
+        return (requested_grant * impact) // SCORE_MAX
+    return u256(0)
+
+
 class GrantSentinel(gl.Contract):
     owner: Address
-    treasury_budget: u256
     proposal_counter: u256
     review_counter: u256
+    receipt_counter: u256
+
+    total_supply: u256
+    vault_custody_balance: u256
+    total_allocated_unclaimed: u256
+    total_disbursed: u256
 
     proposals: TreeMap[u256, GrantProposal]
     reviews: TreeMap[u256, DelegateReview]
+    transfer_ledger: TreeMap[u256, PayoutReceipt]
+    token_balances: TreeMap[Address, u256]
     claimable_grants: TreeMap[Address, u256]
     delegate_reputation: TreeMap[Address, u256]
     delegate_order: DynArray[Address]
@@ -179,9 +280,30 @@ class GrantSentinel(gl.Contract):
 
     def __init__(self):
         self.owner = gl.message.sender_address
-        self.treasury_budget = u256(50000000)
         self.proposal_counter = u256(0)
         self.review_counter = u256(0)
+        self.receipt_counter = u256(0)
+
+        # Funded custody: mint the full SGT supply to the deployer wallet, then
+        # lock the initial treasury tranche into contract custody by deducting
+        # it from that wallet balance. Custody is backed by a real balance, not
+        # a counter. Total supply stays conserved.
+        self.total_supply = TOTAL_SGT_SUPPLY
+        self.token_balances[self.owner] = TOTAL_SGT_SUPPLY
+        self.vault_custody_balance = INITIAL_CUSTODY
+        self.token_balances[self.owner] = TOTAL_SGT_SUPPLY - INITIAL_CUSTODY
+        self.total_allocated_unclaimed = u256(0)
+        self.total_disbursed = u256(0)
+
+        # Genesis custody deposit appears in the transfer ledger.
+        self.receipt_counter = u256(1)
+        self.transfer_ledger[u256(1)] = PayoutReceipt(
+            receipt_id=u256(1),
+            proposal_id=u256(0),
+            recipient=self.owner,
+            amount=INITIAL_CUSTODY,
+            tx_type=TX_TREASURY_DEPOSIT,
+        )
 
     # -- Grant intake --------------------------------------------------------
 
@@ -230,6 +352,7 @@ class GrantSentinel(gl.Contract):
             verified_impact_score=u256(0),
             approved_payout=u256(0),
             sentinel_audit_report="",
+            claimed=False,
         )
         return new_id
 
@@ -329,15 +452,20 @@ class GrantSentinel(gl.Contract):
         if proposal.status != STATUS_SCREENING:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} proposal not in SCREENING")
 
-        # Snapshot all inputs before the non-deterministic block so the
-        # deterministic disbursement cannot race a concurrent review write.
+        # Snapshot all deterministic inputs before the non-deterministic block so
+        # the quantization, conviction modifier and payout formula are identical
+        # for every validator and cannot race a concurrent review write.
         proof_url = proposal.proof_url
         artifact_token = proposal.mandatory_artifact_token
         project_title = proposal.project_title
         category = proposal.public_good_category
         manifest = proposal.deliverable_manifest
+        requested_grant = proposal.requested_grant
+        endorsements = proposal.conviction_endorsements
+        red_flags = proposal.red_flag_challenges
+        applicant = proposal.applicant
 
-        def leader_audit():
+        def run_audit():
             page = gl.nondet.web.render(proof_url, mode="text")
             body = ""
             if page is not None:
@@ -387,119 +515,169 @@ class GrantSentinel(gl.Contract):
             if report_len > MAX_AUDIT_REPORT:
                 report_raw = report_raw[0:MAX_AUDIT_REPORT]
 
+            # Validators independently re-run this and must agree on the discrete
+            # funding outcome: the tier_status band and the artifact_verified flag.
+            # The exact approved_payout is NOT taken from any single validator's
+            # continuous score; it is derived deterministically after consensus
+            # from the agreed band, so the credited amount is consensus-bound.
+            impact = _finalize_impact(score_raw, endorsements, red_flags, verified_raw)
+            status = _status_for(impact)
+
             return {
-                "impact_score": score_raw,
+                "tier_status": status,
                 "artifact_verified": verified_raw,
                 "audit_report": report_raw,
             }
 
         verdict = gl.eq_principle.prompt_comparative(
-            leader_audit,
+            run_audit,
             principle=(
-                "The impact_score must fall in the same tier band (reject under 45, "
-                "partial 45 to 74, full 75 or above) and artifact_verified must be "
-                "exactly equal. audit_report may differ in wording only."
+                "This decision moves funds, so the discrete settlement inputs must "
+                "match exactly: validators must agree on the identical tier_status "
+                "string (REJECTED vs PARTIAL_GRANT vs APPROVED_FUNDED) and the "
+                "identical artifact_verified boolean. Any difference in tier_status "
+                "or artifact_verified is a disagreement. Only the audit_report "
+                "wording may differ. The exact credited amount is recomputed by the "
+                "contract deterministically from the agreed tier_status and on-chain "
+                "state, so two honest validators whose raw scores land in the same "
+                "band with the same artifact flag are considered in full agreement."
             ),
         )
 
-        return self._apply_verdict(
-            proposal_id, verdict["impact_score"], verdict["artifact_verified"], verdict["audit_report"]
-        )
+        # Deterministic, consensus-bound settlement: the exact approved_payout is a
+        # pure function of the agreed band plus on-chain state, never a leader's raw
+        # number. Re-verify consistency before touching storage.
+        agreed_status = verdict["tier_status"]
+        agreed_verified = verdict["artifact_verified"]
+        if isinstance(agreed_verified, str):
+            agreed_verified = (agreed_verified == "true" or agreed_verified == "True")
+        agreed_verified = bool(agreed_verified)
 
-    @gl.public.write
-    def audit_grant_deterministic(
-        self,
-        proposal_id: u256,
-        verified_impact_score: u256,
-        audit_report: str,
-    ) -> str:
-        if gl.message.sender_address != self.owner:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} only owner may run deterministic audit")
-        proposal = self.proposals[proposal_id]
-        if proposal.status != STATUS_SCREENING:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} proposal not in SCREENING")
-        if verified_impact_score > SCORE_MAX:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} verified_impact_score must be 0..100")
-        report_len = len(audit_report)
-        if report_len > MAX_AUDIT_REPORT:
-            raise gl.vm.UserError(f"{ERROR_EXPECTED} audit_report exceeds 400 chars")
-        # Owner-provided audits never carry an independent artifact check.
-        return self._apply_verdict(proposal_id, i256(verified_impact_score), True, audit_report)
-
-    @gl.private
-    def _apply_verdict(
-        self,
-        proposal_id: u256,
-        score_raw: i256,
-        artifact_verified: bool,
-        audit_report: str,
-    ) -> str:
-        proposal = self.proposals[proposal_id]
-        impact = _clamp_score(score_raw)
-
-        # Community conviction modifier.
-        if proposal.red_flag_challenges > proposal.conviction_endorsements:
-            if impact >= RED_FLAG_PENALTY:
-                impact = impact - RED_FLAG_PENALTY
-            else:
-                impact = u256(0)
-        elif proposal.conviction_endorsements > proposal.red_flag_challenges:
-            if impact + ENDORSE_BONUS > SCORE_MAX:
-                impact = SCORE_MAX
-            else:
-                impact = impact + ENDORSE_BONUS
-
-        # Unverified artifact hard cap when the model still scored it high.
-        if artifact_verified is False and impact >= TIER_FULL:
-            impact = UNVERIFIED_CAP
-
-        status = STATUS_REJECTED
-        payout = u256(0)
-        if impact >= TIER_FULL:
-            status = STATUS_APPROVED
-            payout = proposal.requested_grant
-        elif impact >= TIER_PARTIAL:
-            status = STATUS_PARTIAL
-            payout = (proposal.requested_grant * impact) // SCORE_MAX
+        if agreed_status == STATUS_APPROVED:
+            if agreed_verified is False:
+                raise gl.vm.UserError(f"{ERROR_EXPECTED} unverified artifact cannot fully fund")
+            score_rep = SCORE_MAX
+            agreed_payout = requested_grant
+        elif agreed_status == STATUS_PARTIAL:
+            score_rep = PARTIAL_REPRESENTATIVE
+            agreed_payout = (requested_grant * score_rep) // SCORE_MAX
+        elif agreed_status == STATUS_REJECTED:
+            score_rep = u256(0)
+            agreed_payout = u256(0)
         else:
-            status = STATUS_REJECTED
-            payout = u256(0)
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} consensus returned invalid tier_status")
 
-        # Treasury conservation: never pay out more than the pool holds.
-        if payout > self.treasury_budget:
-            payout = self.treasury_budget
-
-        if payout > u256(0):
-            self.treasury_budget = self.treasury_budget - payout
-            applicant = proposal.applicant
+        # Funded custody reservation: only unencumbered custody may back a grant.
+        if agreed_payout > u256(0):
+            unencumbered = self.vault_custody_balance - self.total_allocated_unclaimed
+            if unencumbered < agreed_payout:
+                raise gl.vm.UserError(f"{ERROR_EXPECTED} insufficient unencumbered custody")
+            self.total_allocated_unclaimed = self.total_allocated_unclaimed + agreed_payout
             existing = self.claimable_grants.get(applicant)
             if existing is None:
-                self.claimable_grants[applicant] = payout
+                self.claimable_grants[applicant] = agreed_payout
             else:
-                self.claimable_grants[applicant] = existing + payout
+                self.claimable_grants[applicant] = existing + agreed_payout
 
-        report_trim = audit_report
+        report_trim = verdict["audit_report"]
         if len(report_trim) > MAX_AUDIT_REPORT:
             report_trim = report_trim[0:MAX_AUDIT_REPORT]
 
         updated = self.proposals[proposal_id]
-        updated.status = status
-        updated.verified_impact_score = impact
-        updated.approved_payout = payout
+        updated.status = agreed_status
+        updated.verified_impact_score = score_rep
+        updated.approved_payout = agreed_payout
         updated.sentinel_audit_report = report_trim
+        updated.claimed = False
         self.proposals[proposal_id] = updated
-        return status
+        return agreed_status
 
-    # -- Payout and withdrawal ----------------------------------------------
+    # -- Funded custody and token transfers ----------------------------------
 
     @gl.public.write
-    def claim_grant_payout(self) -> u256:
+    def deposit_treasury_funds(self, amount: u256) -> u256:
+        if amount <= u256(0):
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} deposit amount must be positive")
         sender = gl.message.sender_address
-        claimable = self.claimable_grants.get(sender)
-        if claimable is None or claimable == u256(0):
+        balance = self.token_balances.get(sender)
+        if balance is None:
+            balance = u256(0)
+        if balance < amount:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} insufficient SGT balance for deposit")
+        self.token_balances[sender] = balance - amount
+        self.vault_custody_balance = self.vault_custody_balance + amount
+        self._record_receipt(u256(0), sender, amount, TX_TREASURY_DEPOSIT)
+        return self.vault_custody_balance
+
+    @gl.public.write
+    def claim_grant_payout(self, proposal_id: u256) -> u256:
+        proposal = self.proposals[proposal_id]
+        if proposal.status != STATUS_APPROVED and proposal.status != STATUS_PARTIAL:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} proposal has no funded payout to claim")
+        if proposal.claimed is True:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} payout already claimed")
+        sender = gl.message.sender_address
+        if sender != proposal.applicant:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} only applicant may claim payout")
+        payout = proposal.approved_payout
+        if payout <= u256(0):
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} zero payout cannot be claimed")
+
+        credit = self.claimable_grants.get(sender)
+        if credit is None or credit < payout:
             raise gl.vm.UserError(f"{ERROR_EXPECTED} no claimable grant payout")
-        self.claimable_grants[sender] = u256(0)
-        return claimable
+        if self.vault_custody_balance < payout:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} custody underfunded")
+
+        # Real custody-to-wallet asset transfer.
+        self.vault_custody_balance = self.vault_custody_balance - payout
+        self.total_allocated_unclaimed = self.total_allocated_unclaimed - payout
+        self.claimable_grants[sender] = credit - payout
+        held = self.token_balances.get(sender)
+        if held is None:
+            held = u256(0)
+        self.token_balances[sender] = held + payout
+        self.total_disbursed = self.total_disbursed + payout
+        self._record_receipt(proposal_id, sender, payout, TX_GRANT_DISBURSEMENT)
+
+        updated = self.proposals[proposal_id]
+        updated.claimed = True
+        self.proposals[proposal_id] = updated
+        return payout
+
+    @gl.public.write
+    def transfer_grant_tokens(self, recipient: str, amount: u256) -> u256:
+        if amount <= u256(0):
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} transfer amount must be positive")
+        sender = gl.message.sender_address
+        balance = self.token_balances.get(sender)
+        if balance is None:
+            balance = u256(0)
+        if balance < amount:
+            raise gl.vm.UserError(f"{ERROR_EXPECTED} insufficient SGT balance for transfer")
+        recipient_addr = Address(recipient)
+        self.token_balances[sender] = balance - amount
+        held = self.token_balances.get(recipient_addr)
+        if held is None:
+            held = u256(0)
+        self.token_balances[recipient_addr] = held + amount
+        self._record_receipt(u256(0), recipient_addr, amount, TX_TOKEN_TRANSFER)
+        return self.token_balances[recipient_addr]
+
+    @gl.private
+    def _record_receipt(self, proposal_id: u256, recipient: Address, amount: u256, tx_type: str) -> u256:
+        new_id = self.receipt_counter + u256(1)
+        self.receipt_counter = new_id
+        self.transfer_ledger[new_id] = PayoutReceipt(
+            receipt_id=new_id,
+            proposal_id=proposal_id,
+            recipient=recipient,
+            amount=amount,
+            tx_type=tx_type,
+        )
+        return new_id
+
+    # -- Withdraw ------------------------------------------------------------
 
     @gl.public.write
     def withdraw_proposal(self, proposal_id: u256) -> None:
@@ -533,6 +711,7 @@ class GrantSentinel(gl.Contract):
             "verified_impact_score": p.verified_impact_score,
             "approved_payout": p.approved_payout,
             "sentinel_audit_report": p.sentinel_audit_report,
+            "claimed": p.claimed,
         }
 
     @gl.public.view
@@ -573,6 +752,31 @@ class GrantSentinel(gl.Contract):
         return val
 
     @gl.public.view
+    def get_wallet_token_balance(self, account: str) -> u256:
+        addr = Address(account)
+        val = self.token_balances.get(addr)
+        if val is None:
+            return u256(0)
+        return val
+
+    @gl.public.view
+    def get_transfer_receipts(self) -> list:
+        out = []
+        i = u256(1)
+        while i <= self.receipt_counter:
+            r = self.transfer_ledger.get(i)
+            if r is not None:
+                out.append({
+                    "receipt_id": r.receipt_id,
+                    "proposal_id": r.proposal_id,
+                    "recipient": str(r.recipient),
+                    "amount": r.amount,
+                    "tx_type": r.tx_type,
+                })
+            i = i + u256(1)
+        return out
+
+    @gl.public.view
     def get_delegate_leaderboard(self) -> list:
         out = []
         n = len(self.delegate_order)
@@ -594,7 +798,6 @@ class GrantSentinel(gl.Contract):
         rejected = u256(0)
         screening = u256(0)
         withdrawn = u256(0)
-        total_granted = u256(0)
         i = u256(1)
         while i <= self.proposal_counter:
             p = self.proposals.get(i)
@@ -609,13 +812,16 @@ class GrantSentinel(gl.Contract):
                     withdrawn = withdrawn + u256(1)
                 else:
                     screening = screening + u256(1)
-                total_granted = total_granted + p.approved_payout
             i = i + u256(1)
         return {
-            "treasury_budget": self.treasury_budget,
-            "total_granted": total_granted,
+            "total_supply": self.total_supply,
+            "vault_custody_balance": self.vault_custody_balance,
+            "total_allocated_unclaimed": self.total_allocated_unclaimed,
+            "total_disbursed": self.total_disbursed,
+            "unencumbered_custody": self.vault_custody_balance - self.total_allocated_unclaimed,
             "proposal_count": self.proposal_counter,
             "review_count": self.review_counter,
+            "receipt_count": self.receipt_counter,
             "screening_count": screening,
             "approved_count": approved,
             "partial_count": partial,

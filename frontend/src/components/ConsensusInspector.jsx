@@ -1,11 +1,11 @@
-import { Globe, ShieldAlert, ScanLine, Brain, Users, Coins, CheckCircle2 } from "lucide-react";
-import { simulateTier } from "../config";
+import { Globe, ShieldAlert, ScanLine, Brain, Users, Landmark, CheckCircle2 } from "lucide-react";
 
 // Visualizes the exact on-chain consensus and prompt pipeline for one proposal.
 export default function ConsensusInspector({ proposal }) {
   if (!proposal) return null;
   const p = proposal;
-  const tier = simulateTier(p.impact_score, p.upvotes, p.red_flags, p.artifact_verified);
+  // p.impact_score is the on-chain stored quantized score; the settlement stages
+  // below read it directly rather than re-applying the modifier.
   const defused = /(<\/?untrusted_data|<\/?SENTINEL_USER_TEXT)/i.test(p.grant_manifest) ? "would be defused" : "clean";
 
   const stages = [
@@ -29,21 +29,21 @@ export default function ConsensusInspector({ proposal }) {
     },
     {
       icon: Brain,
-      name: "gl.nondet.exec_prompt → JSON verdict",
-      detail: "artifact_verified, evidence_quality (0-100), risk_flags, summary",
-      note: "The LLM scores evidence quality only; it never decides a fund amount directly.",
+      name: "gl.nondet.exec_prompt -> raw impact_score, artifact_verified, report",
+      detail: "the LLM only proposes a raw 0..100 score; it never sets a fund amount",
+      note: "The raw score is snapped to the deterministic 5-point grid and mapped to a funding band label.",
     },
     {
       icon: Users,
-      name: "gl.eq_principle.prompt_comparative",
-      detail: `Tier band around score ${p.impact_score} (75 / 45 boundaries)`,
-      note: "Consensus fails closed unless validators agree within the tier band and on artifact_verified.",
+      name: "gl.eq_principle.prompt_comparative (exact on discrete labels)",
+      detail: `validators must agree on the identical tier_status ${p.status} and artifact_verified for score ${p.impact_score}`,
+      note: "Consensus is required on the tier band and artifact flag; the exact payout is then recomputed deterministically from the agreed band, so no leader raw score sets the amount.",
     },
     {
-      icon: Coins,
-      name: "Deterministic settlement",
-      detail: `Status ${tier.status} · adjusted impact ${tier.impact} · red-flag -15 · endorse +5 · unverified cap 70`,
-      note: `Community signal: ${p.upvotes} endorsements vs ${p.red_flags} red-flag challenges.`,
+      icon: Landmark,
+      name: "Funded custody reservation",
+      detail: `Status ${p.status} · representative ${p.impact_score} · exact payout ${p.credited_tokens} SGT · reserve requires unencumbered custody >= payout`,
+      note: `Approved payouts are reserved from the vault, then moved wallet-to-wallet on claim. Community signal: ${p.upvotes} endorsements vs ${p.red_flags} red-flag challenges.`,
     },
   ];
 

@@ -1,6 +1,6 @@
 import { createClient, createAccount, generatePrivateKey } from "genlayer-js";
 import { studionet } from "genlayer-js/chains";
-import { CONTRACT_ADDRESS } from "./config.js";
+import { CONTRACT_ADDRESS, TOTAL_SGT_SUPPLY } from "./config.js";
 
 export { shortAddr } from "./config.js";
 
@@ -78,7 +78,7 @@ function read(client, functionName, args = []) {
   return client.readContract({ address: CONTRACT_ADDRESS, functionName, args });
 }
 
-export async function readModel() {
+export async function readModel(address = null) {
   const client = readClient();
   const rawList = await read(client, "get_all_proposals", []);
   const proposals = {};
@@ -102,6 +102,7 @@ export async function readModel() {
       review_count: num(p.review_count),
       impact_score: num(p.verified_impact_score),
       status: p.status,
+      claimed: !!p.claimed,
       artifact_verified: true,
       audit_report: p.sentinel_audit_report,
     };
@@ -132,11 +133,25 @@ export async function readModel() {
 
   let summary = {};
   try { summary = await read(client, "get_sentinel_summary", []); } catch { /* best effort */ }
-  const derivedCredited = Object.values(proposals).reduce((s, p) => s + p.credited_tokens, 0);
+
+  let receipts = [];
+  try { receipts = await read(client, "get_transfer_receipts", []); } catch { /* best effort */ }
+
+  let walletBalance = 0;
+  let claimable = 0;
+  if (address) {
+    try { walletBalance = num(await read(client, "get_wallet_token_balance", [address])); } catch { /* best effort */ }
+    try { claimable = num(await read(client, "get_claimable_grant", [address])); } catch { /* best effort */ }
+  }
 
   return {
-    treasury_budget: num(summary.treasury_budget) || 50000000,
-    total_credited_tokens: num(summary.total_granted) || derivedCredited,
+    total_supply: num(summary.total_supply) || TOTAL_SGT_SUPPLY,
+    vault_custody_balance: num(summary.vault_custody_balance),
+    total_allocated_unclaimed: num(summary.total_allocated_unclaimed),
+    total_disbursed: num(summary.total_disbursed),
+    unencumbered_custody: num(summary.unencumbered_custody),
+    wallet_balance: walletBalance,
+    wallet_claimable: claimable,
     next_proposal_id: num(summary.proposal_count) + 1,
     next_review_id: num(summary.review_count) + 1,
     counts: {
@@ -146,6 +161,13 @@ export async function readModel() {
       rejected: num(summary.rejected_count),
       withdrawn: num(summary.withdrawn_count),
     },
+    receipts: (receipts || []).map((r) => ({
+      id: num(r.receipt_id),
+      proposal_id: num(r.proposal_id),
+      recipient: r.recipient,
+      amount: num(r.amount),
+      tx_type: r.tx_type,
+    })),
     proposals,
     reviews,
   };

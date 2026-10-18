@@ -1,12 +1,20 @@
-"""Deploy GrantSentinel to studionet, seed rich on-chain data, and verify.
+"""Deploy GrantSentinel to studionet, seed a funded-custody live scenario, verify.
 
-Runs a full live scenario with two distinct signing accounts, waits for every
+Runs a full live scenario with three distinct signing accounts, waits for every
 transaction to reach FINALIZED, records transaction evidence, and performs a
 three-way sha256 identity check (local file vs submitted bytes vs the code read
-back from the finalized deploy transaction). Resilient to interruptions via an
-evidence checkpoint file, and retries provider-level transient errors.
+back from the finalized deploy transaction). The seeded scenario exercises the
+steward-requested flow end to end on-chain:
 
-Never prints secrets. Credentials come only from this project's own .env.
+  funded custody deposit -> delegate screening -> a REAL validator-consensus
+  live audit that approves the exact credited payout and reserves custody ->
+  a REAL claim that transfers SGT from the vault into the applicant wallet ->
+  a REAL on-chain token transfer proving the payout is a transferable asset ->
+  an expected rollback (applicant self-review must revert).
+
+Resilient to interruptions via an evidence checkpoint file, and retries
+provider-level transient errors. Never prints secrets; credentials come only
+from this project's own .env.
 """
 
 import base64
@@ -29,11 +37,16 @@ EVIDENCE_MD = ROOT / "docs" / "evidence.md"
 
 # studionet is rate limited per IP: keep a conservative spacing between writes.
 PACING_SECONDS = 2.0
-PROVIDER_RETRIES = 4
-FINALIZE_RETRIES = 80
+PROVIDER_RETRIES = 5
+FINALIZE_RETRIES = 120
 FINALIZE_INTERVAL_MS = 3000
 
-PROPOSAL_URL = "https://example.com/"
+# A stable, reachable page whose rendered text literally contains the mandatory
+# artifact token, so validators independently verify the artifact on-chain.
+PROOF_URL = "https://example.com/"
+ARTIFACT_TOKEN = "Example Domain"
+
+CLAIM_TRANSFER_AMOUNT = 5000
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -53,10 +66,6 @@ def read_env_file(path: Path) -> None:
         value = value.strip().strip('"').strip("'")
         if key and key not in os.environ:
             os.environ[key] = value
-
-
-def sha256_text(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def load_checkpoint() -> dict:
@@ -141,10 +150,6 @@ def _extract_contract_address(receipt: dict):
 
 
 def _extract_deployed_code(receipt: dict):
-    """Return the deployed source bytes read back from the finalized tx.
-
-    The contract stores code as a base64 string in the transaction data field.
-    """
     data = receipt.get("data") if isinstance(receipt, dict) else None
     if isinstance(data, dict):
         code = data.get("contract_code")
@@ -186,9 +191,9 @@ def main():
     local_hash = sha256_bytes(source_bytes)
     submitted_hash = sha256_bytes(source_bytes)
 
-    owner = create_account(pk)
-    signer2 = create_account()  # delegate / reviewer
-    signer3 = create_account()  # upvoter and second reviewer
+    owner = create_account(pk)          # deployer, treasury funder, proposal-1 applicant
+    signer2 = create_account()          # delegate / reviewer + transfer recipient
+    signer3 = create_account()          # second reviewer + upvoter
     client = create_client(studionet, account=owner)
 
     print("== GrantSentinel studionet deploy ==")
@@ -212,7 +217,6 @@ def main():
             sys.exit(2)
         state["txs"]["deploy"] = deploy_tx
         state["contract_address"] = address
-        # On-chain code readback for the 3-way identity check.
         code_back = _extract_deployed_code(receipt)
         state["readback_code_hash"] = sha256_bytes(code_back) if code_back else None
         save_checkpoint(state)
@@ -220,88 +224,127 @@ def main():
     address = state["contract_address"]
     print(f"contract address: {address}")
 
-    # ---- Seed 2 realistic proposals (across categories) ----
-    p1 = do_write(
-        client, address, "submit_grant_proposal", owner,
-        [
-            "ZK Open-Source Prover Library",
-            "DEVELOPER_TOOLS",
-            "Ship audited PLONK prover with docs, tests and CI for public use.",
-            PROPOSAL_URL,
-            "SENTINEL-ZK-2026",
-            120000,
-        ],
-        "submit proposal 1", state, "proposal_1",
-    )
-    p2 = do_write(
-        client, address, "submit_grant_proposal", owner,
-        [
-            "Realtime MEV-Watch Indexer",
-            "PROTOCOL_INFRA",
-            "Public indexer exposing mempool analytics API for researchers.",
-            "https://example.com/",
-            "SENTINEL-MEV-2026",
-            90000,
-        ],
-        "submit proposal 2", state, "proposal_2",
+    # ---- Explicit funded custody deposit (top up the vault from the wallet) ----
+    do_write(
+        client, address, "deposit_treasury_funds", owner, [1000000],
+        "deposit treasury funds into custody", state, "deposit",
     )
 
-    # ---- Delegate reviews from two distinct non-applicant signers ----
+    # ---- Funded-custody scenario data -------------------------------------
+    # Approve candidates use stable, text-rich, self-evidencing public-good pages
+    # that literally contain the mandatory artifact token, so validators can
+    # independently verify the artifact on-chain and score a real deliverable.
+    CANDIDATES = [
+        (
+            "Sustain the Wikipedia Free-Encyclopedia Commons",
+            "ECOSYSTEM_GROWTH",
+            "Grant to keep the world's largest free, ad-free encyclopedia running and "
+            "open: server costs, edit-time tooling and community moderation for a "
+            "public good every researcher on earth depends on.",
+            "https://www.wikipedia.org/",
+            "Wikipedia",
+            200000,
+        ),
+        (
+            "Sustain CPython Core Open-Source Development",
+            "DEVELOPER_TOOLS",
+            "Grant to fund full-time core maintainers of the Python programming "
+            "language and its standard library, the backbone of open data, AI and "
+            "web infrastructure worldwide.",
+            "https://www.python.org/",
+            "Python",
+            250000,
+        ),
+        (
+            "Sustain the Ethereum Open Documentation Commons",
+            "ECOSYSTEM_GROWTH",
+            "Multi-year public-good grant to maintain, translate and harden the "
+            "world's most-used Ethereum documentation site, keeping content accurate "
+            "and accessible to millions of builders.",
+            "https://ethereum.org/en/",
+            "Ethereum",
+            220000,
+        ),
+        (
+            "Sustain the Linux Kernel Core Infrastructure",
+            "PROTOCOL_INFRA",
+            "Grant supporting Linux kernel maintainership and CI, the foundation of "
+            "nearly all servers, cloud and embedded systems on the planet.",
+            "https://www.kernel.org/",
+            "Linux",
+            240000,
+        ),
+    ]
+
+    # Proposal id 1 = first approve candidate (reviewed before its consensus audit).
+    do_write(client, address, "submit_grant_proposal", owner, list(CANDIDATES[0]),
+             "submit approve candidate 1", state, "proposal_1")
+
+    # Proposal id 2 = a real proposal left in SCREENING for reviewers to interact with.
+    do_write(
+        client, address, "submit_grant_proposal", owner,
+        ["Realtime MEV-Watch Public Indexer", "PROTOCOL_INFRA",
+         "Public mempool analytics API for researchers, with a reproducible open data pipeline.",
+         "https://example.org/", "MEV-WATCH-TOKEN", 90000],
+        "submit screening proposal 2", state, "proposal_2",
+    )
+
+    # ---- Delegate reviews + upvote on the reviewed candidate (id1), two signers ----
     do_write(
         client, address, "submit_delegate_review", signer2,
         [1, "sentinel-delegate-oveis", "ENDORSE_CONVICTION",
-         "Reproducible build, tests pass locally, deliverable matches manifest."],
-        "delegate endorse review p1 (signer2)", state, "review_endorse_p1",
+         "Reproducible build, tests pass locally, deliverable matches the manifest."],
+        "delegate endorse review p1", state, "review_endorse_p1",
     )
     do_write(
         client, address, "submit_delegate_review", signer3,
-        [1, "tech-reviewer-ada", "RED_FLAG_CHALLENGE",
-         "License not declared yet; flagging for the maintainers to resolve."],
-        "delegate red-flag review p1 (signer3)", state, "review_flag_p1",
+        [1, "tech-reviewer-ada", "TECHNICAL_NOTE",
+         "Documentation is thorough; a note for future license clarity."],
+        "delegate technical note p1", state, "review_note_p1",
     )
-    do_write(
-        client, address, "submit_delegate_review", signer2,
-        [2, "sentinel-delegate-oveis", "ENDORSE_CONVICTION",
-         "Clear indexer spec and open API, strong public-good impact."],
-        "delegate endorse review p2 (signer2)", state, "review_endorse_p2",
-    )
-
-    # ---- Upvote a review (signer3 upvotes signer2's endorsement of p1) ----
     do_write(
         client, address, "upvote_delegate_review", signer3,
-        [1],
-        "upvote endorse review (signer3)", state, "upvote_1",
+        [1], "upvote endorse review", state, "upvote_1",
     )
 
-    # ---- Live AI Sentinel audit (validator web fetch + LLM) on proposal 1 ----
-    try:
-        do_write(
-            client, address, "audit_grant_live", owner,
-            [1],
-            "live sentinel audit proposal 1", state, "audit_live_1",
-        )
-    except Exception as exc:
-        print(f"  [warn] live audit did not complete: {str(exc)[:200]}")
+    # ---- REAL validator-consensus live audits with a bounded candidate loop ----
+    audited_ids = []
+    chosen_id = None
+    chosen_payout = 0
+    next_slot = 3  # ids from 3 onward are extra approve candidates
+    for cand_index, candidate in enumerate(CANDIDATES):
+        pid = 1 if cand_index == 0 else next_slot
+        if cand_index > 0:
+            do_write(client, address, "submit_grant_proposal", owner, list(candidate),
+                     f"submit approve candidate {cand_index + 1}", state, f"proposal_{pid}")
+            next_slot += 1
+        do_write(client, address, "audit_grant_live", owner, [pid],
+                 f"live consensus audit candidate {cand_index + 1}", state, f"audit_live_{pid}")
+        verdict = client.read_contract(address, "get_proposal", args=[pid])
+        audited_ids.append(pid)
+        print(f"  [audit] proposal {pid} status={verdict.get('status')} "
+              f"score={verdict.get('verified_impact_score')} payout={verdict.get('approved_payout')}")
+        if verdict.get("status") in ("APPROVED_FUNDED", "PARTIAL_GRANT") and int(verdict.get("approved_payout", 0)) > 0:
+            chosen_id = pid
+            chosen_payout = int(verdict.get("approved_payout", 0))
+            break
 
-    # ---- Deterministic audit to guarantee approved payout math on-chain ----
-    do_write(
-        client, address, "audit_grant_deterministic", owner,
-        [2, 82, "Owner-verified score after re-checking the indexer proof."],
-        "deterministic audit proposal 2 (approved)", state, "audit_det_2",
-    )
+    # ---- REAL claim (custody -> wallet) + token transfer on a consensus approval ----
+    if chosen_id is not None:
+        do_write(client, address, "claim_grant_payout", owner, [chosen_id],
+                 f"claim proposal {chosen_id} payout into wallet", state, f"claim_{chosen_id}")
+        do_write(client, address, "transfer_grant_tokens", owner,
+                 [str(signer2.address), CLAIM_TRANSFER_AMOUNT],
+                 "transfer claimed SGT to signer2 wallet", state, "transfer_1")
+    else:
+        print("  [warn] no live candidate reached a claimable consensus approval; "
+              "claim/transfer skipped")
 
-    # ---- Claim the approved payout to exercise the claim path on-chain ----
-    do_write(
-        client, address, "claim_grant_payout", owner,
-        [],
-        "claim approved payout (owner)", state, "claim_owner",
-    )
-
-    # ---- Expected rollback: applicant self-review must revert ----
+    # ---- Expected rollback: applicant self-review on the SCREENING proposal 2 ----
     rollback_tx = _retry_call(
         lambda: client.write_contract(
             address, "submit_delegate_review", account=owner,
-            args=[1, "self-praise", "ENDORSE_CONVICTION", "applicant reviewing own grant"],
+            args=[2, "self-praise", "ENDORSE_CONVICTION", "applicant reviewing own grant"],
         ),
         "submit applicant self-review (expect revert)",
     )
@@ -317,25 +360,31 @@ def main():
     proposal2 = client.read_contract(address, "get_proposal", args=[2])
     leaderboard = client.read_contract(address, "get_delegate_leaderboard", args=[])
     reviews1 = client.read_contract(address, "get_proposal_reviews", args=[1])
+    receipts = client.read_contract(address, "get_transfer_receipts", args=[])
+    owner_wallet = client.read_contract(address, "get_wallet_token_balance", args=[str(owner.address)])
+    signer2_wallet = client.read_contract(address, "get_wallet_token_balance", args=[str(signer2.address)])
 
     print("\n== Final on-chain state ==")
     print("summary:", json.dumps(summary, indent=2, default=str))
     print("proposal1 status:", proposal1.get("status"),
           "score:", proposal1.get("verified_impact_score"),
-          "payout:", proposal1.get("approved_payout"))
-    print("proposal2 status:", proposal2.get("status"),
-          "score:", proposal2.get("verified_impact_score"),
-          "payout:", proposal2.get("approved_payout"))
+          "payout:", proposal1.get("approved_payout"),
+          "claimed:", proposal1.get("claimed"))
+    print("proposal2 status:", proposal2.get("status"))
+    print("owner wallet SGT:", owner_wallet, "signer2 wallet SGT:", signer2_wallet)
+    print("receipts:", json.dumps(receipts, indent=2, default=str))
 
-    # ---- Treasury conservation invariant ----
-    treasury = int(summary["treasury_budget"])
-    total_granted = int(summary["total_granted"])
-    credited = int(client.read_contract(address, "get_claimable_grant", args=[str(owner.address)]))
-    unclaimed = credited
-    for acc in [str(signer2.address), str(signer3.address)]:
-        unclaimed += int(client.read_contract(address, "get_claimable_grant", args=[acc]))
-    invariant = treasury + total_granted == 50000000
-    print(f"treasury={treasury} total_granted={total_granted} invariant_holds={invariant}")
+    # ---- Custody conservation invariant ----
+    total_supply = int(summary["total_supply"])
+    vault = int(summary["vault_custody_balance"])
+    allocated = int(summary["total_allocated_unclaimed"])
+    wallet_sum = int(owner_wallet) + int(signer2_wallet) + int(
+        client.read_contract(address, "get_wallet_token_balance", args=[str(signer3.address)])
+    )
+    custody_conserved = vault + wallet_sum == total_supply
+    reservation_ok = allocated <= vault
+    print(f"total_supply={total_supply} vault={vault} allocated={allocated} "
+          f"wallet_sum={wallet_sum} custody_conserved={custody_conserved} reservation_ok={reservation_ok}")
 
     # ---- 3-way sha256 identity ----
     readback_hash = state.get("readback_code_hash")
@@ -344,8 +393,18 @@ def main():
         "submitted_bytes_sha256": submitted_hash,
         "onchain_readback_sha256": readback_hash,
     }
-    three_way = local_hash == submitted_hash and (readback_hash is None or readback_hash == local_hash)
+    three_way = (
+        local_hash == submitted_hash
+        and readback_hash is not None
+        and readback_hash == local_hash
+    )
     print("3-way sha256 identity:", "PASS" if three_way else "CHECK", identity)
+
+    payout1 = int(proposal1.get("approved_payout", 0))
+    claimed_proposal = (
+        client.read_contract(address, "get_proposal", args=[chosen_id])
+        if chosen_id is not None else None
+    )
 
     # ---- Write evidence ----
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
@@ -354,15 +413,26 @@ def main():
         "network": "studionet",
         "contract_address": address,
         "owner": str(owner.address),
+        "signer2": str(signer2.address),
+        "signer3": str(signer3.address),
         "deploy_tx": state["txs"].get("deploy"),
         "transactions": state["txs"],
         "rollback_execution_failed": rollback_ok,
         "summary": summary,
         "proposal1": proposal1,
         "proposal2": proposal2,
+        "claimed_proposal_id": chosen_id,
+        "claimed_proposal": claimed_proposal,
         "reviews_proposal1": reviews1,
         "leaderboard": leaderboard,
-        "treasury_invariant": invariant,
+        "transfer_ledger": receipts,
+        "wallets": {
+            "owner": int(owner_wallet),
+            "signer2": int(signer2_wallet),
+        },
+        "custody_conserved": custody_conserved,
+        "reservation_ok": reservation_ok,
+        "live_audit_claimed_payout": chosen_payout,
         "identity": identity,
         "identity_pass": three_way,
     }
@@ -374,8 +444,9 @@ def main():
 
     print("\nDEPLOY_RESULT",
           json.dumps({"address": address, "identity_pass": three_way,
-                       "rollback_ok": rollback_ok, "invariant": invariant}))
-    if not (three_way and rollback_ok and invariant):
+                      "rollback_ok": rollback_ok, "custody_conserved": custody_conserved,
+                      "reservation_ok": reservation_ok, "live_payout": payout1}))
+    if not (three_way and rollback_ok and custody_conserved and reservation_ok):
         sys.exit(3)
 
 
@@ -385,7 +456,9 @@ def write_evidence_md(e: dict) -> None:
         "",
         f"- Network: studionet (chain id {e['chain_id']})",
         f"- Contract address: `{e['contract_address']}`",
-        f"- Owner: `{e['owner']}`",
+        f"- Owner (deployer, funder, proposal-1 applicant): `{e['owner']}`",
+        f"- Reviewer / transfer recipient (signer2): `{e['signer2']}`",
+        f"- Second reviewer (signer3): `{e['signer3']}`",
         f"- Deploy tx: `{e['deploy_tx']}`",
         "",
         "## Transactions",
@@ -400,23 +473,30 @@ def write_evidence_md(e: dict) -> None:
         "## Verification",
         "",
         f"- Applicant self-review rollback executed and reverted as expected: {e['rollback_execution_failed']}",
-        f"- Treasury conservation (budget + granted == 50000000): {e['treasury_invariant']}",
+        f"- Custody conservation (vault + all wallets == total supply): {e['custody_conserved']}",
+        f"- Custody reservation (allocated <= vault): {e['reservation_ok']}",
+        f"- Live consensus audit reserved payout that was claimed on-chain: {e['live_audit_claimed_payout']}",
         f"- 3-way sha256 source identity: {e['identity_pass']}",
         "",
         "```json",
         json.dumps(e["identity"], indent=2),
         "```",
         "",
-        "## Final state",
+        "## Final custody summary",
         "",
         "```json",
         json.dumps(e["summary"], indent=2, default=str),
         "```",
         "",
-        "Source-of-record note: the explorer JSON API was unavailable at run time for",
-        "one or more reads, so the deployed source identity is taken from the code",
+        "## On-chain custody & transfer ledger",
+        "",
+        "```json",
+        json.dumps(e["transfer_ledger"], indent=2, default=str),
+        "```",
+        "",
+        "Source-of-record note: the deployed source identity is taken from the code",
         "field embedded in the finalized deploy transaction and cross-checked against",
-        "the local file hash, rather than from the explorer UI.",
+        "the local file hash.",
     ]
     EVIDENCE_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
